@@ -2,6 +2,84 @@ import torch
 import gpytorch
 import numpy as np
 from math import pi
+from data import StateIdx, InputIdx
+from dataclasses import dataclass
+from typing import List
+from gp_to_casadi import get_xdot
+
+
+@dataclass
+class GPSettings:
+    """Settings for a single GP model"""
+    name: str
+    state_indices: List[int]  # Which state variables are inputs
+    control_indices: List[int]  # Which control variables are inputs
+    output_index: int  # Which state derivative this GP predicts
+    periodic_inputs: List[bool]  # Which inputs are periodic
+    
+    @property
+    def input_dim(self):
+        """Number of inputs in total"""
+        return len(self.state_indices) + len(self.control_indices)
+    
+    @property
+    def control_dim(self):
+        """Number of control inputs"""
+        return len(self.control_indices)
+    
+    @property
+    def state_dim(self):
+        """Number of state inputs"""
+        return len(self.state_indices)
+    
+    def get_input_indices(self):
+        """Get the indices for all inputs, state first then control"""
+        return self.state_indices + self.control_indices
+    
+    def get_input(self, X: np.ndarray):
+        """Extract the relevant input"""
+        return X[:, self.get_input_indices()]
+    
+    def get_output(self, Y: np.ndarray):
+        """Get the relevant output"""
+        return Y[:, self.output_index]
+
+
+def create_gp_settings():
+    """Create settings for all GPs and return them as a dictionary"""
+    return {
+        StateIdx.V1: GPSettings(
+            name="v1_dot",
+            state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
+            control_indices=[StateIdx.THRUST],
+            output_index=StateIdx.V1,
+            periodic_inputs=[False, False, False, False]),
+        StateIdx.V2: GPSettings(
+            name="v2_dot",
+            state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
+            control_indices=[StateIdx.THRUST],
+            output_index=StateIdx.V2,
+            periodic_inputs=[False, False, False, False]),
+        StateIdx.V3: GPSettings(
+            name="v3_dot",
+            state_indices=[StateIdx.ROLL, StateIdx.PITCH],
+            control_indices=[StateIdx.THRUST],
+            output_index=StateIdx.V3,
+            periodic_inputs=[False, False, False]),
+        StateIdx.ROLL: GPSettings(
+            name="roll_dot",
+            state_indices=[StateIdx.ROLL],
+            control_indices=[StateIdx.ROLL_REF],
+            output_index=StateIdx.ROLL,
+            periodic_inputs=[False, False]),
+        StateIdx.PITCH: GPSettings(
+            name="pitch_dot",
+            state_indices=[StateIdx.PITCH],
+            control_indices=[StateIdx.PITCH_REF],
+            output_index=StateIdx.PITCH,
+            periodic_inputs=[False, False])
+        }
+
 
 # When you predic you want to set a known min max values such that the 
 # value to predic is scaled in accordance with the training data
@@ -13,7 +91,8 @@ def min_max_norm(data, set_min=None, set_max=None):
         min = np.min(data)
         max = np.max(data)
     
-    return (data - min)/(max - min) 
+    return (data - min)/(max - min)
+
 
 class SingleOutputGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
@@ -99,7 +178,6 @@ class DifferentialGP:
         return mu, var
 
 
-
 class MultiGP:
     def __init__(self, input_dim, output_dim, device="cpu"):
         self.input_dim = input_dim # Not really used
@@ -160,3 +238,20 @@ class MultiGP:
         mu = np.hstack(mus)  # (N, output_dim)
         var = np.hstack(vars_)  # (N, output_dim)
         return mu, var
+
+
+def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr):
+    """Create and train GPs for all given GP settings, both in gpytorch and casadi, return as dictionary"""
+    gps = {}
+    casadi_gps = {}
+    for idx, setting in gp_settings.items():
+        gp = DifferentialGP(input_dim=setting.input_dim, device=device, periodic_inputs=setting.periodic_inputs)
+        input_data = setting.get_input(X_train)
+        output_data = setting.get_output(Y_train)
+        gp.add_data(input_data, output_data)
+        gp.train(training_iter, lr) 
+        casadi_gp = get_xdot(gp, input_data, output_data, setting.control_dim)
+        gps[idx] = gp
+        casadi_gps[idx] = casadi_gp
+
+    return gps, casadi_gps

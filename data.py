@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from dataclasses import dataclass, asdict, fields
 from typing import ClassVar
+from enum import IntEnum
 
 
 class ODEData:
@@ -56,8 +57,6 @@ class ODEData:
         # return cls()
         return cls.from_numpy(np.zeros(len(fields(cls))))
 
-        
-
 
 @dataclass
 class State(ODEData):
@@ -101,3 +100,27 @@ class Params(ODEData):
     dragacc2: float
 
 Params.DIM = 7
+
+
+class StateIdx(IntEnum):
+    V1 = 0
+    V2 = 1
+    V3 = 2
+    ROLL = 3
+    PITCH = 4
+    YAW = 5
+    P1 = 6
+    P2 = 7
+    P3 = 8
+    ROLL_REF = 9
+    PITCH_REF = 10
+    THRUST = 11
+    ROLL_REF_DOT = 12
+    PITCH_REF_DOT = 13
+    THRUST_DOT = 14
+
+
+class InputIdx(IntEnum):
+    ROLL_REF_DDOT = 0
+    PITCH_REF_DDOT = 1
+    THRUST_DDOT = 2

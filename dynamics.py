@@ -1,7 +1,7 @@
 from data import *
-from typing import Callable, List
-from gp import min_max_norm
-from math import pi 
+from typing import Callable, List, Dict, Any
+from gp import DifferentialGP
+
 
 Perturbation = Callable[[State, Input, Params, State], State]
 
@@ -39,12 +39,10 @@ def differentiate(state: State,
     v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1
     v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2
     v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
-    #print(f"v3_act: {v3_dot}, pitch: {pitch}, roll: {roll},  thrust: {thrust}")
 
     # rotational dynamics
     roll_dot = (roll_gain * roll_ref - roll) / roll_tau
     pitch_dot = (pitch_gain * pitch_ref - pitch) / pitch_tau
-    # print(f"roll_dot_roll: {roll_dot}, roll: {roll},  roll_ref: {roll_ref}")
     yaw_dot = 0.0
 
     # position dynamics
@@ -134,7 +132,7 @@ def differentiate_features(
 def differentiate_gp(state: State, 
                   input: Input, 
                   params: Params,
-                  diff_gps
+                  gps: Dict[StateIdx, DifferentialGP]
                 ) -> State:
     """
     Compute time-derivative of the state vector.
@@ -166,17 +164,15 @@ def differentiate_gp(state: State,
     #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 # GP:able
     #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 # GP:able
     # v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
-    # Here we manually set the min max values for scaling in practies this should be part of the gp object
-    #v3_dot, _ = gp_v3.predict([[min_max_norm(roll, -pi, pi ), min_max_norm(thrust, -5, 150)]]) 
-    v1_dot = diff_gps["v1_dot"].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
-    v2_dot = diff_gps["v2_dot"].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
-    v3_dot = diff_gps["v3_dot"].predict([[roll, pitch, thrust]])[0][0, 0]
+    v1_dot = gps[StateIdx.V1].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
+    v2_dot = gps[StateIdx.V2].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
+    v3_dot = gps[StateIdx.V3].predict([[roll, pitch, thrust]])[0][0, 0]
 
     # rotational dynamics
     # roll_dot = (roll_gain * roll_ref - roll) / roll_tau # GP:able
     # pitch_dot = (pitch_gain * pitch_ref - pitch) / pitch_tau #GP:able
-    roll_dot = diff_gps["roll_dot"].predict([[roll, roll_ref]])[0][0, 0]
-    pitch_dot = diff_gps["pitch_dot"].predict([[pitch, pitch_ref]])[0][0, 0]
+    roll_dot = gps[StateIdx.ROLL].predict([[roll, roll_ref]])[0][0, 0]
+    pitch_dot = gps[StateIdx.PITCH].predict([[pitch, pitch_ref]])[0][0, 0]
 
     yaw_dot = 0.0
 
@@ -201,14 +197,13 @@ def differentiate_gp(state: State,
         roll_ref_dot_dot, pitch_ref_dot_dot, thrust_dot_dot
     )
 
-    
     return res_state
 
 
 def differentiate_gp_casadi(state: State, 
                   input: Input, 
                   params: Params,
-                  diff_gps
+                  gps: Dict[StateIdx, Any]
                 ) -> State:
     """
     Compute time-derivative of the state vector.
@@ -240,17 +235,12 @@ def differentiate_gp_casadi(state: State,
     #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 # GP:able
     #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 # GP:able
     # v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
-    # Here we manually set the min max values for scaling in practies this should be part of the gp object
-    #v3_dot, _ = gp_v3.predict([[min_max_norm(roll, -pi, pi ), min_max_norm(thrust, -5, 150)]]) 
-    v1_dot = float(diff_gps["v1_dot"]([roll, pitch, yaw], [thrust]))
-    # v2_dot = diff_gps["v2_dot"].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
-    v2_dot = float(diff_gps["v2_dot"]([roll, pitch, yaw], [thrust]))
-    # v3_dot = diff_gps["v3_dot"].predict([[roll, pitch, thrust]])[0][0, 0]
-    v3_dot = float(diff_gps["v3_dot"]([roll, pitch], [thrust]))
+    v1_dot = float(gps[StateIdx.V1]([roll, pitch, yaw], [thrust]))
+    v2_dot = float(gps[StateIdx.V2]([roll, pitch, yaw], [thrust]))
+    v3_dot = float(gps[StateIdx.V3]([roll, pitch], [thrust]))
 
-    roll_dot = float(diff_gps["roll_dot"]([roll], [roll_ref]))
-    pitch_dot = float(diff_gps["pitch_dot"]([pitch], [pitch_ref]))
-
+    roll_dot = float(gps[StateIdx.ROLL]([roll], [roll_ref]))
+    pitch_dot = float(gps[StateIdx.PITCH]([pitch], [pitch_ref]))
 
     yaw_dot = 0.0
 
@@ -286,21 +276,21 @@ def step(state: State, input: Input, params: Params, dt: float, perturbations=No
     state_dot = differentiate(state, input, params, perturbations)
     return State.from_numpy(state.as_numpy() + state_dot.as_numpy() * dt)
 
-def step_gp(state, input, params: Params, dt: float, gp_v3) -> State:
+def step_gp(state: State, input: Input, params: Params, dt: float, gps) -> State:
     """
     Euler integration: x_{t+dt} = x_t + f(x_t)*dt
     But now we more GP:s!
     """
-    state_dot = differentiate_gp(state, input, params, gp_v3)
+    state_dot = differentiate_gp(state, input, params, gps)
     return State.from_numpy(state.as_numpy() + state_dot.as_numpy() * dt)
 
 
-def step_gp_casadi(state, input, params: Params, dt: float, gp) -> State:
+def step_gp_casadi(state: State, input: Input, params: Params, dt: float, gps) -> State:
     """
     Euler integration: x_{t+dt} = x_t + f(x_t)*dt
     But now we more GP:s!
     """
-    state_dot = differentiate_gp_casadi(state, input, params, gp)
+    state_dot = differentiate_gp_casadi(state, input, params, gps)
     return State.from_numpy(state.as_numpy() + state_dot.as_numpy() * dt)
 
 

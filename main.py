@@ -1,11 +1,12 @@
 import torch
 import gpytorch
+import casadi as cs
 
 from data import *
 from itertools import product
 
 from dynamics import step, differentiate_features, step_gp, step_gp_casadi
-from gp import MultiGP, min_max_norm, DifferentialGP
+from gp import MultiGP, min_max_norm, DifferentialGP, create_gp_settings, create_gps
 from gp_to_casadi import get_xdot
 
 from data_gen_cfg import PARAMS, RANGES, CFG1_PERTURBATIONS, CFG2_PERTURBATIONS
@@ -50,13 +51,8 @@ def walk_two_drones(gp: MultiGP, params: Params, dt: float, input_sequence: list
     gp_positions = []
 
     for u in input_sequence:
-        # pick input
-
         # true step
-        # print(f"before :{drone_true}")
         drone_true = step(drone_true, u, params, dt)
-        # print(f"after:{drone_true}")
-        # print()
 
         # GP step: predict derivative (state_dot_hat)
         x_feat = make_feature(drone_gp, u).reshape(1, -1)
@@ -111,7 +107,6 @@ def walk_three_drones_vert(diff_gps, diff_gps_casadi, params: Params, dt: float,
 
         # GP step: predict derivative
         drone_gp = step_gp(drone_gp, u, params, dt, diff_gps)
-        
         drone_casadi = step_gp_casadi(drone_casadi, u, params, dt, diff_gps_casadi)
 
         # record positions
@@ -150,46 +145,45 @@ if __name__ == "__main__":
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    v1_dot_gp = DifferentialGP(input_dim=4, device=device, periodic_inputs = [0, 0, 0, 0])
-    v2_dot_gp = DifferentialGP(input_dim=4, device=device, periodic_inputs = [0, 0, 0, 0])
-    v3_dot_gp = DifferentialGP(input_dim=3, device=device, periodic_inputs = [0, 0, 0])
-
-    roll_dot_gp = DifferentialGP(input_dim=2, device=device, periodic_inputs = [0, 0]) # At least I _believe_ that roll_ref is not periodic
-    pitch_dot_gp = DifferentialGP(input_dim=2, device=device, periodic_inputs = [0, 0])
-    
-    v1_dot_xtrain = X_train[:, [3, 4, 5, 11]] # roll pitch yaw thrust
-    v2_dot_xtrain = X_train[:, [3, 4, 5, 11]] # roll pitch yaw thrust
-    v3_dot_xtrain = X_train[:, [3, 4, 11]] # roll pitch thrust
-    roll_dot_xtrain = X_train[:, [3, 9]] # roll roll_ref
-    pitch_dot_xtrain = X_train[:, [4, 10]] # pitch pitch_ref
-    
-    v1_dot_gp.add_data(v1_dot_xtrain, Y_train[:, 0]) 
-    v2_dot_gp.add_data(v2_dot_xtrain, Y_train[:, 1]) 
-    v3_dot_gp.add_data(v3_dot_xtrain, Y_train[:, 2]) 
-    roll_dot_gp.add_data(roll_dot_xtrain, Y_train[:, 3])
-    pitch_dot_gp.add_data(pitch_dot_xtrain, Y_train[:, 4]) 
-
+    gp_settings = create_gp_settings()
     print("training")
-    v1_dot_gp.train(training_iter=training_iter, lr=lr) 
-    v2_dot_gp.train(training_iter=training_iter, lr=lr)
-    v3_dot_gp.train(training_iter=training_iter, lr=lr)
+    gps, casadi_gps = create_gps(gp_settings, device, X_train, Y_train, training_iter, lr)
+    
+    state = cs.MX.sym("state", State.DIM)
+    input_vec = cs.MX.sym("input", Input.DIM)
+    state_dot_list = [None] * 15
+    
+    state_dot_list[StateIdx.V1] = casadi_gps[StateIdx.V1](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH], state[StateIdx.YAW]), cs.vertcat(state[StateIdx.THRUST]))
+    
+    state_dot_list[StateIdx.V2] = casadi_gps[StateIdx.V2](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH], state[StateIdx.YAW]), cs.vertcat(state[StateIdx.THRUST]))
+    
+    state_dot_list[StateIdx.V3] = casadi_gps[StateIdx.V3](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH]), cs.vertcat(state[StateIdx.THRUST]))
+    
+    state_dot_list[StateIdx.ROLL] = casadi_gps[StateIdx.ROLL](cs.vertcat(state[StateIdx.ROLL]), cs.vertcat(state[StateIdx.ROLL_REF]))
 
-    roll_dot_gp.train(training_iter=training_iter, lr=lr)
-    pitch_dot_gp.train(training_iter=training_iter, lr=lr)
-    diff_gps = {"v1_dot": v1_dot_gp, "v2_dot": v2_dot_gp, "v3_dot": v3_dot_gp, "roll_dot": roll_dot_gp, "pitch_dot": pitch_dot_gp}
+    state_dot_list[StateIdx.PITCH] = casadi_gps[StateIdx.PITCH](cs.vertcat(state[StateIdx.PITCH]), cs.vertcat(state[StateIdx.PITCH_REF]))
     
-    v1_dot_gp_casadi = get_xdot(v1_dot_gp, v1_dot_xtrain, Y_train[:, 0], control_dim=1)
-    v2_dot_gp_casadi = get_xdot(v2_dot_gp, v2_dot_xtrain, Y_train[:, 1], control_dim=1)
-    v3_dot_gp_casadi = get_xdot(v3_dot_gp, v3_dot_xtrain, Y_train[:, 2], control_dim=1)
-    roll_dot_gp_casadi = get_xdot(roll_dot_gp, roll_dot_xtrain, Y_train[:, 3], control_dim=1)
-    pitch_dot_gp_casadi = get_xdot(pitch_dot_gp, pitch_dot_xtrain, Y_train[:, 4], control_dim=1)
+    state_dot_list[StateIdx.YAW] = 0.0
     
-    diff_gps_casadi = {"v1_dot": v1_dot_gp_casadi, "v2_dot": v2_dot_gp_casadi, 
-                       "v3_dot": v3_dot_gp_casadi, "roll_dot": roll_dot_gp_casadi, 
-                       "pitch_dot": pitch_dot_gp_casadi}
+    state_dot_list[StateIdx.P1] = state[StateIdx.V1]
+    state_dot_list[StateIdx.P2] = state[StateIdx.V2]
+    state_dot_list[StateIdx.P3] = state[StateIdx.V3]
     
-    true_path, gp_path = walk_two_drones_vert(diff_gps, params, dt, [Input(0.1, 0.0, 5)] * 500)
-    true_path, gp_path, casadi_path = walk_three_drones_vert(diff_gps, diff_gps_casadi, params, dt, [Input(0.1, 0.0, 5)] * 500)
+    state_dot_list[StateIdx.ROLL_REF] = state[StateIdx.ROLL_REF_DOT]
+    state_dot_list[StateIdx.PITCH_REF] = state[StateIdx.PITCH_REF_DOT]
+    state_dot_list[StateIdx.THRUST] = state[StateIdx.THRUST_DOT]
+
+    state_dot_list[StateIdx.ROLL_REF_DOT] = input_vec[InputIdx.ROLL_REF_DDOT]
+    state_dot_list[StateIdx.PITCH_REF_DOT] = input_vec[InputIdx.PITCH_REF_DDOT]
+    state_dot_list[StateIdx.THRUST_DOT] = input_vec[InputIdx.THRUST_DDOT]
+    
+    state_dot = cs.vertcat(*state_dot_list)
+    
+    x_dot = cs.Function("x_dot", [state, input_vec], [state_dot], ["x", "u"], ["x_dot"])
+    
+    print("simulating")
+    true_path, gp_path = walk_two_drones_vert(gps, params, dt, [Input(0.1, 0.0, 5)] * 500)
+    true_path, gp_path, casadi_path = walk_three_drones_vert(gps, casadi_gps, params, dt, [Input(0.1, 0.0, 5)] * 500)
 
     for i in range(true_path.shape[1]):
         fig, axs = plt.subplots(1, 1)

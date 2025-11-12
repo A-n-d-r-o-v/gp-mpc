@@ -3,10 +3,9 @@ import numpy as np
 
 
 def get_xdot(gp_model, x_train, y_train, control_dim):
-    x = cs.reshape(cs.MX.sym("x", x_train.shape[1] - control_dim), 1, -1) # Input variables
+    x = cs.reshape(cs.MX.sym("x", x_train.shape[1] - control_dim), 1, -1) # State variables
     u = cs.reshape(cs.MX.sym("u", control_dim), 1, -1) # Control variables
     
-    # Need to change this function if we ever change the kernel, but based on scaled RBF kernel for now
     def rbf_kernel(X1, X2, lengthscale, outputscale):
         # Scaled RBF kernel formula:
         # outputscale * exp(-1/2 * ||x_di - x_dj||^2 / l_d^2))
