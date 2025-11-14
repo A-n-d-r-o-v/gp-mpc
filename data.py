@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from dataclasses import dataclass, asdict, fields
-from typing import ClassVar
 from enum import IntEnum
 
 

@@ -36,8 +36,8 @@ def differentiate(state: State,
     dragacc2 = params.dragacc2
 
     # translational dynamics
-    v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1
-    v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2
+    v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1
+    v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2
     v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
 
     # rotational dynamics
@@ -99,8 +99,8 @@ def differentiate_features(
     dragacc1, dragacc2 = params.dragacc1, params.dragacc2
 
     # translational dynamics
-    v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1
-    v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2
+    v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1
+    v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2
     v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
 
     # rotational dynamics
@@ -161,8 +161,8 @@ def differentiate_gp(state: State,
     dragacc2 = params.dragacc2
 
     # translational dynamics
-    #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 # GP:able
-    #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 # GP:able
+    #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1 # GP:able
+    #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2 # GP:able
     # v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
     v1_dot = gps[StateIdx.V1].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
     v2_dot = gps[StateIdx.V2].predict([[roll, pitch, yaw, thrust]])[0][0, 0]
@@ -232,8 +232,8 @@ def differentiate_gp_casadi(state: State,
     dragacc2 = params.dragacc2
 
     # translational dynamics
-    #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 # GP:able
-    #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 # GP:able
+    #v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1 # GP:able
+    #v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v1 # GP:able
     # v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
     v1_dot = float(gps[StateIdx.V1]([roll, pitch, yaw], [thrust]))
     v2_dot = float(gps[StateIdx.V2]([roll, pitch, yaw], [thrust]))

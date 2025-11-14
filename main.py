@@ -1,195 +1,84 @@
-import torch
-import gpytorch
-import casadi as cs
+# Read files (Lattice groups)
 
-from data import *
-from itertools import product
+# describe ODE
+# optimize stuff?
 
-from dynamics import step, differentiate_features, step_gp, step_gp_casadi
-from gp import MultiGP, min_max_norm, DifferentialGP, create_gp_settings, create_gps
-from gp_to_casadi import get_xdot
+# Module for saving primitives to file
 
-from data_gen_cfg import PARAMS, RANGES, CFG1_PERTURBATIONS, CFG2_PERTURBATIONS
-from generate_data import generate_data
+from state_info import State
+from grid_point import GridPoint
+from ACADOSDJIMatrice import ACADODjiMatrice
+from old_main import construct_xdot
+import math
 
-import matplotlib
-matplotlib.use("Agg") # Had to do this because of using WSL
-import matplotlib.pyplot as plt
+SAVE_SUCCESS_PATH = "primitives/"
+SAVE_FAILED_PATH = "primitives_failed/"
+GOLD_PATH = "primitives_gold/" 
+def save_primitive_to_file(group, id, name, traj):
+    file_name = "primitive_group_" + str(group) + "_id_" + str(id) + ".txt"
+    
+    if traj.valid:
+        path = SAVE_SUCCESS_PATH
+    else:
+        path = SAVE_FAILED_PATH
 
-
-def make_feature(state, inputs) -> np.ndarray:
-    """
-    Concatenate State and Input into one feature vector.
-    """
-    return np.hstack([state.as_numpy(), inputs.as_numpy()])
-
-
-def generate_discrete_inputs(roll_vals, pitch_vals, thrust_vals):
-    """
-    Cartesian product of 3 lists of candidate values.
-    """
-    return [Input(r, p, t) for r, p, t in product(roll_vals, pitch_vals, thrust_vals)]
-
-
-def most_uncertain_input(state: State, candidates: list[Input], gp: MultiGP):
-    """
-    Return the candidate input with the highest GP predictive uncertainty.
-    """
-    X = np.vstack([make_feature(state, u) for u in candidates])
-    mu, var = gp.predict(X)
-    total_uncertainty = var.sum(axis=1)
-    idx = int(np.argmax(total_uncertainty))
-    return candidates[idx]
+    # ensure file does not exists
+    try:
+        f = open(path+file_name, "x")
+    except:
+        f = open(path+file_name, "w")
+        f.truncate()
+    
+    # write stuff
+    f.write(
+        "Generated trajectory:" + "\n" + 
+        "Group: " + str(group) + "\n" + 
+        "ID: " + str(id) + "\n" + 
+        "Name: " + str(name)
+    )
+    f.write(str(traj))
+    f.close()
 
 
-def walk_two_drones(gp: MultiGP, params: Params, dt: float, input_sequence: list[Input]):
-    # initial states
-    drone_true = State.zero()
-    drone_gp = State.zero()
+def main():
+    number_of_groups = 14
+    sampling_time = 0.1 # 50 Hz
+    x_dot = construct_xdot()
 
-    true_positions = []
-    gp_positions = []
+    for group in range(0, number_of_groups+1):
+        lattice_file = "config/lattice_group" + str(group) + ".txt"
+        f = open(lattice_file)
 
-    for u in input_sequence:
-        # true step
-        drone_true = step(drone_true, u, params, dt)
+        numberOfPrimitives = int(f.readline())
 
-        # GP step: predict derivative (state_dot_hat)
-        x_feat = make_feature(drone_gp, u).reshape(1, -1)
-        mu, _ = gp.predict(x_feat)  # (1, state_dim)
-        state_dot_hat = mu[0]
-        next_state_gp = State.from_numpy(drone_gp.as_numpy() + state_dot_hat * dt)
-        drone_gp = next_state_gp
+        for i in range(numberOfPrimitives):
+            inS = State()
+            fiS = State()
 
-        # record positions
-        true_positions.append([drone_true.p1, drone_true.p2, drone_true.p3])
-        gp_positions.append([drone_gp.p1, drone_gp.p2, drone_gp.p3])
+            f.readline() # read the "\n"
 
-    return np.array(true_positions), np.array(gp_positions)
+            id = int(f.readline())
+            name = str(f.readline())
+            finalTime = float(f.readline())
 
+            inS.x, inS.y, inS.z, inS.vx, inS.vy, inS.vz = map(float, f.readline().split())
+            
+            fiS.x, fiS.y, fiS.z, fiS.vx, fiS.vy, fiS.vz = map(float, f.readline().split())
+            inS.time = 0.0
+            fiS.time = finalTime
 
-# This is a walking drone sim locked to one axis 
-def walk_two_drones_vert(diff_gps, params: Params, dt: float, input_sequence: list[Input]):
-    # initial states
-    drone_true = State.zero()
-    drone_gp = State.zero()
+            gridPoint = GridPoint(inS, fiS, name, id, group)
+            nSegments = math.floor(finalTime / sampling_time)+1
+            traj = ACADODjiMatrice(inS, fiS, nSegments, finalTime, x_dot)
 
-    true_positions = []
-    gp_positions = []
+            save_primitive_to_file(group, id, name, traj)
 
-    for u in input_sequence:
-        # Base line ODE prediction
-        drone_true = step(drone_true, u, params, dt)
+        print(numberOfPrimitives)
 
-        # GP step: predict derivative
-        drone_gp = step_gp(drone_gp, u, params, dt, diff_gps)
-
-        # record positions
-        true_positions.append([drone_true.p1, drone_true.p2, drone_true.p3])
-        gp_positions.append([drone_gp.p1, drone_gp.p2, drone_gp.p3])
-
-    return np.array(true_positions), np.array(gp_positions)
-
-# This is a walking drone sim locked to one axis 
-def walk_three_drones_vert(diff_gps, diff_gps_casadi, params: Params, dt: float, input_sequence: list[Input]):
-    # initial states
-    drone_true = State.zero()
-    drone_gp = State.zero()
-    drone_casadi = State.zero()
-
-    true_positions = []
-    gp_positions = []
-    casadi_positions = []
-
-    for u in input_sequence:
-        # Base line ODE prediction
-        drone_true = step(drone_true, u, params, dt)
-
-        # GP step: predict derivative
-        drone_gp = step_gp(drone_gp, u, params, dt, diff_gps)
-        drone_casadi = step_gp_casadi(drone_casadi, u, params, dt, diff_gps_casadi)
-
-        # record positions
-        true_positions.append([drone_true.p1, drone_true.p2, drone_true.p3])
-        gp_positions.append([drone_gp.p1, drone_gp.p2, drone_gp.p3])
-        casadi_positions.append([drone_casadi.p1, drone_casadi.p2, drone_gp.p3])
-
-    return np.array(true_positions), np.array(gp_positions), np.array(casadi_positions)
-
+        pass
+    pass
 
 if __name__ == "__main__":
-    drone = State.zero()
-    params = Params(
-        g=9.8066,
-        roll_gain=1.101, roll_tau=0.253,
-        pitch_gain=1.097, pitch_tau=0.267,
-        dragacc1=0.01, dragacc2=0.01
-    )
+    main()
 
-    training_iter = 100
-    lr = 0.5
-    dt = 0.01  # 100hz
-    N = 100
-    X, Y = generate_data(N, RANGES)
-    
-    gpytorch.settings.eval_cg_tolerance._set_value(0)
-    gpytorch.settings.max_cg_iterations._set_value(100000)
-    
-    test_size = 0.2
-    test_count = int(N * test_size)
-    test_idx = np.arange(N)[:test_count]
-    train_idx = np.arange(N)[test_count:]
 
-    X_train, Y_train = X[train_idx], Y[train_idx]
-    X_test, Y_test = X[test_idx], Y[test_idx]
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    gp_settings = create_gp_settings()
-    print("training")
-    gps, casadi_gps = create_gps(gp_settings, device, X_train, Y_train, training_iter, lr)
-    
-    state = cs.MX.sym("state", State.DIM)
-    input_vec = cs.MX.sym("input", Input.DIM)
-    state_dot_list = [None] * 15
-    
-    state_dot_list[StateIdx.V1] = casadi_gps[StateIdx.V1](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH], state[StateIdx.YAW]), cs.vertcat(state[StateIdx.THRUST]))
-    
-    state_dot_list[StateIdx.V2] = casadi_gps[StateIdx.V2](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH], state[StateIdx.YAW]), cs.vertcat(state[StateIdx.THRUST]))
-    
-    state_dot_list[StateIdx.V3] = casadi_gps[StateIdx.V3](cs.vertcat(state[StateIdx.ROLL], state[StateIdx.PITCH]), cs.vertcat(state[StateIdx.THRUST]))
-    
-    state_dot_list[StateIdx.ROLL] = casadi_gps[StateIdx.ROLL](cs.vertcat(state[StateIdx.ROLL]), cs.vertcat(state[StateIdx.ROLL_REF]))
-
-    state_dot_list[StateIdx.PITCH] = casadi_gps[StateIdx.PITCH](cs.vertcat(state[StateIdx.PITCH]), cs.vertcat(state[StateIdx.PITCH_REF]))
-    
-    state_dot_list[StateIdx.YAW] = 0.0
-    
-    state_dot_list[StateIdx.P1] = state[StateIdx.V1]
-    state_dot_list[StateIdx.P2] = state[StateIdx.V2]
-    state_dot_list[StateIdx.P3] = state[StateIdx.V3]
-    
-    state_dot_list[StateIdx.ROLL_REF] = state[StateIdx.ROLL_REF_DOT]
-    state_dot_list[StateIdx.PITCH_REF] = state[StateIdx.PITCH_REF_DOT]
-    state_dot_list[StateIdx.THRUST] = state[StateIdx.THRUST_DOT]
-
-    state_dot_list[StateIdx.ROLL_REF_DOT] = input_vec[InputIdx.ROLL_REF_DDOT]
-    state_dot_list[StateIdx.PITCH_REF_DOT] = input_vec[InputIdx.PITCH_REF_DDOT]
-    state_dot_list[StateIdx.THRUST_DOT] = input_vec[InputIdx.THRUST_DDOT]
-    
-    state_dot = cs.vertcat(*state_dot_list)
-    
-    x_dot = cs.Function("x_dot", [state, input_vec], [state_dot], ["x", "u"], ["x_dot"])
-    
-    print("simulating")
-    true_path, gp_path = walk_two_drones_vert(gps, params, dt, [Input(0.1, 0.0, 5)] * 500)
-    true_path, gp_path, casadi_path = walk_three_drones_vert(gps, casadi_gps, params, dt, [Input(0.1, 0.0, 5)] * 500)
-
-    for i in range(true_path.shape[1]):
-        fig, axs = plt.subplots(1, 1)
-        axs.plot(true_path[:, i], "b-", label="True Dynamics")
-        axs.plot(gp_path[:, i], "r-", label="GP Dynamics")
-        axs.plot(casadi_path[:, i], "g--", label="CasADi Dynamics")
-        fig.legend()
-        plt.savefig(f"gpg_dim{i}.png")
-    

@@ -45,40 +45,51 @@ class GPSettings:
         return Y[:, self.output_index]
 
 
-def create_gp_settings():
-    """Create settings for all GPs and return them as a dictionary"""
-    return {
-        StateIdx.V1: GPSettings(
+def create_gp_settings(gps):
+    """Create settings for all requested GPs and return them as a dictionary"""
+    gp_settings = {}
+    
+    if StateIdx.V1 in gps:
+        gp_settings[StateIdx.V1] = GPSettings(
             name="v1_dot",
             state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
             control_indices=[StateIdx.THRUST],
             output_index=StateIdx.V1,
-            periodic_inputs=[False, False, False, False]),
-        StateIdx.V2: GPSettings(
+            periodic_inputs=[False, False, False, False])
+
+    if StateIdx.V2 in gps:
+        gp_settings[StateIdx.V2] = GPSettings(
             name="v2_dot",
             state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
             control_indices=[StateIdx.THRUST],
             output_index=StateIdx.V2,
-            periodic_inputs=[False, False, False, False]),
-        StateIdx.V3: GPSettings(
+            periodic_inputs=[False, False, False, False])
+
+    if StateIdx.V3 in gps:
+        gp_settings[StateIdx.V3] = GPSettings(
             name="v3_dot",
             state_indices=[StateIdx.ROLL, StateIdx.PITCH],
             control_indices=[StateIdx.THRUST],
             output_index=StateIdx.V3,
-            periodic_inputs=[False, False, False]),
-        StateIdx.ROLL: GPSettings(
+            periodic_inputs=[False, False, False])
+
+    if StateIdx.ROLL in gps:
+        gp_settings[StateIdx.ROLL] = GPSettings(
             name="roll_dot",
             state_indices=[StateIdx.ROLL],
             control_indices=[StateIdx.ROLL_REF],
             output_index=StateIdx.ROLL,
-            periodic_inputs=[False, False]),
-        StateIdx.PITCH: GPSettings(
+            periodic_inputs=[False, False])
+
+    if StateIdx.PITCH in gps:
+        gp_settings[StateIdx.PITCH] = GPSettings(
             name="pitch_dot",
             state_indices=[StateIdx.PITCH],
             control_indices=[StateIdx.PITCH_REF],
             output_index=StateIdx.PITCH,
             periodic_inputs=[False, False])
-        }
+    
+    return gp_settings
 
 
 # When you predic you want to set a known min max values such that the 
@@ -241,15 +252,16 @@ class MultiGP:
 
 
 def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr):
-    """Create and train GPs for all given GP settings, both in gpytorch and casadi, return as dictionary"""
+    """Create and train GPs for all given GP settings and translate to CasADi, return GP and CasADi representations in dictionaries"""
     gps = {}
     casadi_gps = {}
+
     for idx, setting in gp_settings.items():
         gp = DifferentialGP(input_dim=setting.input_dim, device=device, periodic_inputs=setting.periodic_inputs)
         input_data = setting.get_input(X_train)
         output_data = setting.get_output(Y_train)
         gp.add_data(input_data, output_data)
-        gp.train(training_iter, lr) 
+        gp.train(training_iter, lr)
         casadi_gp = get_xdot(gp, input_data, output_data, setting.control_dim)
         gps[idx] = gp
         casadi_gps[idx] = casadi_gp
