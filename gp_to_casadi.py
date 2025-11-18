@@ -67,37 +67,120 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
 
 
-def get_function_estimator(func: cs.Function, x_min, x_max, n_samples=20, method='bspline'):
+def split_inputs(f_cat: cs.Function, x_size: int, u_size: int):
     """
-    This function creates an "estimator" for another function. Wohoo
-    """
+    Converts a CasADi function f_cat(X) with concatenated input X=[x; u] 
+    into a function f(x, u) with separate inputs.
     
-    input_dim = len(x_min)
+    Parameters
+    ----------
+    f_cat : cs.Function
+        Original function with single input X = [x; u].
+    x_size : int
+        Dimension of x.
+    u_size : int
+        Dimension of u.
+        
+    Returns
+    -------
+    f_split : cs.Function
+        New function with two inputs [x, u].
+    """
+    # Create separate symbolic inputs
+    x = cs.MX.sym("x", x_size)
+    u = cs.MX.sym("u", u_size)
+    
+    # Concatenate inputs
+    X = cs.vertcat(x, u)
+    
+    # Evaluate original concatenated function
+    y = f_cat(X)
+    
+    # Create new function with separate inputs
+    f_split = cs.Function(f_cat.name() + "_split", [x, u], [y])
+    
+    return f_split
 
-    if isinstance(n_samples, int):
-        n_samples = [n_samples] * input_dim
 
-    # Create sampling grid
-    grids = [np.linspace(x_min[i], x_max[i], n_samples[i]) for i in range(input_dim)]
+def concatenate_inputs(func: cs.Function, x_size, u_size):
+    """
+    Converts a CasADi function f(x, u) into f_cat(X) where
+    X = [x; u] concatenated vector.
+    
+    Parameters
+    ----------
+    func : cs.Function
+        Original function with two inputs [x, u].
+    x_size : int
+        Dimension of x.
+    u_size : int
+        Dimension of u.
+        
+    Returns
+    -------
+    f_cat : cs.Function
+        New function with single input X = [x; u].
+    """
+    # Single input variable
+    X = cs.MX.sym("X", x_size + u_size)
+    
+    # Split into original inputs - ensure correct order
+    x = X[:x_size]  # First x_size elements are x
+    u = X[x_size:x_size + u_size]  # Next u_size elements are u
+    
+    # Evaluate original function
+    y = func(x, u)
+    
+    # Create new function
+    f_cat = cs.Function(func.name() + "_cat", [X], [y])
+    
+    return f_cat
+
+
+def get_function_estimator(f_casadi, bounds, n_points_per_dim=20, method='bspline'):
+    """
+    Create a CasADi interpolant for a function f(x).
+    
+    Parameters:
+    - f_casadi: CasADi function, e.g., f = ca.Function('f', [x], [y])
+    - bounds: list of tuples [(x1_min, x1_max), (x2_min, x2_max), ...]
+    - n_points_per_dim: number of points in each dimension for interpolation
+    - method: 'linear', 'bspline', or 'nearest' (CasADi supported)
+    
+    Returns:
+    - interp: CasADi interpolant function
+    """
+    n_vars = len(bounds)
+    
+    # Create grids for each dimension as Python lists
+    grids = [list(np.linspace(low, high, n_points_per_dim)) for (low, high) in bounds]
+    
+    # Create meshgrid with 'ij' indexing
     mesh = np.meshgrid(*grids, indexing='ij')
-    points = np.stack([m.flatten() for m in mesh], axis=-1)
-
-    # Evaluate function on grid
-    y_vals = np.array([func(point).full().flatten() for point in points])
     
-    # Reshape to match CasADi interpolant format
-    y_grid_shape = [len(g) for g in grids] + [1]
-    Y = y_vals.reshape(*y_grid_shape)
+    # Flatten meshgrid points for function evaluation
+    points = np.stack([m.flatten(order='C') for m in mesh], axis=-1)
     
-    # Convert grids and Y to lists
-    grids_list = [g.tolist() for g in grids]
-    #Y_list = Y.tolist()
-    Y_list = y_vals.flatten().tolist()
-
-    # Create fast interpolant
-    f_interp = cs.interpolant("f_interp", method, grids_list, Y_list)
+    # Evaluate CasADi function
+    y_vals = np.array([f_casadi(pt).full().item() for pt in points])
     
-    return f_interp
+    # Reshape to grid shape
+    grid_shape = [n_points_per_dim] * n_vars
+    y_vals_grid = y_vals.reshape(grid_shape)
+    
+    # Reverse axes to fix variable ordering (so x0, x1, x2 -> x2, x1, x0)
+    y_vals_grid_fixed = np.transpose(y_vals_grid, axes=range(n_vars-1, -1, -1))
+    
+    # Flatten back to 1D Python list
+    y_vals_fixed = y_vals_grid_fixed.flatten().tolist()
+    
+    # Reverse grids as well, to match new axis ordering
+    grids_fixed = grids[::-1]
+    
+    # Create CasADi interpolant
+    interp = cs.interpolant('interp', method, grids_fixed, y_vals_fixed)
+    
+    return interp
 
 
 def get_mean_and_variance(gp_model, x_train, y_train, control_dim):

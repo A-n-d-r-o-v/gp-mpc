@@ -11,6 +11,9 @@ from ACADOSDJIMatrice import ACADODjiMatrice
 from old_main import construct_xdot
 import math
 
+import casadi as cs
+from gp_to_casadi import get_function_estimator, concatenate_inputs, split_inputs
+
 SAVE_SUCCESS_PATH = "primitives/"
 SAVE_FAILED_PATH = "primitives_failed/"
 GOLD_PATH = "primitives_gold/" 
@@ -41,6 +44,32 @@ def save_primitive_to_file(group, id, name, traj):
 
 
 def main():
+    """
+    x = cs.SX.sym("x", 2)
+    u = cs.SX.sym("u", 1)
+    y = cs.sin(x[0]) + cs.cos(x[1] - u)
+    f = cs.Function("f", [x, u], [y])
+    val = f([0.9, 0.5], [0.1])
+    print("standard", val.full())
+    
+    print("new stuff")
+
+    f_cat = concatenate_inputs(f, 2, 1)
+    val = f_cat([0.9, 0.5, 0.1])
+    print("concat", val.full())
+
+    f_est = get_function_estimator(f_cat, [(-1, 1) for i in range(3)])
+    val = f_est([0.1, 0.5, 0.9])
+    print("reverse order", val.full())
+    val = f_est([0.9, 0.5, 0.1])
+    print("correct order", val.full())
+
+    f_est_split = split_inputs(f_est, 2, 1)
+    val = f_est_split([0.9, 0.5], [0.1])
+    print("split f_est", val.full())
+    return
+    #"""
+
     number_of_groups = 14
     sampling_time = 0.1 # 50 Hz
     x_dot = construct_xdot()

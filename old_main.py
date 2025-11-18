@@ -10,6 +10,7 @@ from gp import MultiGP, create_gp_settings, create_gps
 
 from data_gen_cfg import PARAMS, RANGES, CFG1_PERTURBATIONS, CFG2_PERTURBATIONS
 from generate_data import generate_data
+from gp_to_casadi import get_function_estimator, concatenate_inputs, split_inputs
 
 import matplotlib
 matplotlib.use("Agg") # Had to do this because of using WSL
@@ -106,10 +107,10 @@ def construct_xdot():
         pitch_gain=1.097, pitch_tau=0.267,
         dragacc1=0.01, dragacc2=0.01
     )
-    training_iter = 100
-    lr = 0.5
-    N = 100
-    X, Y = generate_data(N, RANGES)
+    training_iter = 300  #100
+    lr = 0.01            #0.5
+    N = 500              #100
+    X, Y = generate_data(N, RANGES, lhs_random_state=1234)
     
     gpytorch.settings.eval_cg_tolerance._set_value(0)
     gpytorch.settings.max_cg_iterations._set_value(100000)
@@ -121,14 +122,17 @@ def construct_xdot():
     X_train, Y_train = X[train_idx], Y[train_idx]
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
-    gps_to_create = []
+    print("training on device ", device)
+
+    #gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
+    #gps_to_create = [StateIdx.PITCH, StateIdx.ROLL]
+    gps_to_create = [StateIdx.V3]
     
     gp_settings = create_gp_settings(gps_to_create)
     print("training")
     gps, casadi_gps = create_gps(gp_settings, device, X_train, Y_train, training_iter, lr)
-    
+    print("done training")
+
     state = cs.MX.sym("state", State.DIM)
     input_vec = cs.MX.sym("input", Input.DIM)
     state_dot_list = [None] * 15
@@ -137,9 +141,9 @@ def construct_xdot():
     pitch = state[StateIdx.PITCH]
     yaw = state[StateIdx.YAW]
     known_dynamics = {
-        StateIdx.V1: (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * state[StateIdx.THRUST] - state[StateIdx.V1] * params.dragacc1,
-        StateIdx.V2: (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * state[StateIdx.THRUST] - state[StateIdx.V2] * params.dragacc2,
-        StateIdx.V3: -params.g + np.cos(pitch) * np.cos(roll) * state[StateIdx.THRUST],
+        StateIdx.V1: (cs.cos(roll) * np.cos(yaw) * cs.sin(pitch) + cs.sin(roll) * cs.sin(yaw)) * state[StateIdx.THRUST] - state[StateIdx.V1] * params.dragacc1,
+        StateIdx.V2: (cs.cos(roll) * np.sin(pitch) * cs.sin(yaw) - cs.cos(yaw) * cs.sin(roll)) * state[StateIdx.THRUST] - state[StateIdx.V2] * params.dragacc2,
+        StateIdx.V3: -params.g + cs.cos(pitch) * cs.cos(roll) * state[StateIdx.THRUST],
         StateIdx.ROLL: (params.roll_gain * state[StateIdx.ROLL_REF] - roll) / params.roll_tau,
         StateIdx.PITCH: (params.pitch_gain * state[StateIdx.PITCH_REF] - pitch) / params.pitch_tau,
         StateIdx.YAW: cs.MX.zeros(1),
@@ -157,15 +161,27 @@ def construct_xdot():
     for idx, gp in casadi_gps.items():
         states = [state[i] for i in gp_settings[idx].state_indices]
         controls = [state[i] for i in gp_settings[idx].control_indices]
-        state_dot_list[idx] = gp(cs.vertcat(*states), cs.vertcat(*controls))
-    
+        # gp is a f(x, u) function. We need a f(X) to work with (simpler)
+        gp_func = gp
+        num_variables = len(states) + len(controls)
+
+        gp_concat = concatenate_inputs(gp_func, len(states), len(controls))
+        gp_est = get_function_estimator(gp_concat, [(-4, 15) for i in range(num_variables)])
+        gp_split = split_inputs(gp_est, len(states), len(controls))
+        
+        state_dot_list[idx] = gp_split(cs.vertcat(*states), cs.vertcat(*controls))
+
+        #state_dot_list[idx] = gp_func#
+
     for idx in set(StateIdx) - casadi_gps.keys():
         state_dot_list[idx] = known_dynamics[idx]
     
     state_dot = cs.vertcat(*state_dot_list)
     
-    return cs.Function("x_dot", [state, input_vec], [state_dot], ["x", "u"], ["x_dot"])
-    
+    #return cs.Function("x_dot", [state, input_vec], [state_dot], ["x", "u"], ["x_dot"])
+    casFunc = cs.Function("x_dot", [state, input_vec], [state_dot], ["x", "u"], ["x_dot"])
+
+    return casFunc
 
 def test_gps():
     params = Params(
