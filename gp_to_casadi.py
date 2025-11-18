@@ -67,6 +67,39 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
 
 
+def get_function_estimator(func: cs.Function, x_min, x_max, n_samples=20, method='bspline'):
+    """
+    This function creates an "estimator" for another function. Wohoo
+    """
+    
+    input_dim = len(x_min)
+
+    if isinstance(n_samples, int):
+        n_samples = [n_samples] * input_dim
+
+    # Create sampling grid
+    grids = [np.linspace(x_min[i], x_max[i], n_samples[i]) for i in range(input_dim)]
+    mesh = np.meshgrid(*grids, indexing='ij')
+    points = np.stack([m.flatten() for m in mesh], axis=-1)
+
+    # Evaluate function on grid
+    y_vals = np.array([func(point).full().flatten() for point in points])
+    
+    # Reshape to match CasADi interpolant format
+    y_grid_shape = [len(g) for g in grids] + [1]
+    Y = y_vals.reshape(*y_grid_shape)
+    
+    # Convert grids and Y to lists
+    grids_list = [g.tolist() for g in grids]
+    #Y_list = Y.tolist()
+    Y_list = y_vals.flatten().tolist()
+
+    # Create fast interpolant
+    f_interp = cs.interpolant("f_interp", method, grids_list, Y_list)
+    
+    return f_interp
+
+
 def get_mean_and_variance(gp_model, x_train, y_train, control_dim):
     x = cs.reshape(cs.MX.sym("x", x_train.shape[1] - control_dim), 1, -1) # Input variables
     u = cs.reshape(cs.MX.sym("u", control_dim), 1, -1) # Control variables
