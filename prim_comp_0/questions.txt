@@ -1,0 +1,3 @@
+* Much data => unfeasable time to train
+* Too little data => inaccurate GPs
+* Solution? Make a polynomial-approx/spline. of functions?
