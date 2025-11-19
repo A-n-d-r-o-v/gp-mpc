@@ -194,7 +194,7 @@ def test_gps():
     training_iter = 100
     lr = 0.5
     dt = 0.01  # 100hz
-    N = 50
+    N = 100
     X, Y = generate_data(N, RANGES)
     
     gpytorch.settings.eval_cg_tolerance._set_value(0)
@@ -225,6 +225,17 @@ def test_gps():
         axs.plot(casadi_path[:, i], "g--", label="CasADi Dynamics")
         fig.legend()
         plt.savefig(f"gpg_dim{i}.png")
+    
+    for i, gp in gps.items():
+        casadi_pred = np.array([casadi_gps[i](x[gp_settings[i].state_indices], x[gp_settings[i].control_indices]).full().flatten()[0] for x in X_test])
+        mu_pred, _ = gp.predict(gp_settings[i].get_input(X_test))
+        plt.figure()
+        plt.plot(mu_pred, "o-", label="GP mean")
+        plt.plot(casadi_pred, "x-", markersize=7, label="CasADi mean")
+        plt.title(f"Output dimension {i}")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"gp_mean_comparison_dim{i}.png")
 
 
 if __name__ == "__main__":
