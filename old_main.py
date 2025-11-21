@@ -124,7 +124,7 @@ def construct_xdot():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("training on device ", device)
 
-    #gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
+    # gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
     #gps_to_create = [StateIdx.PITCH, StateIdx.ROLL]
     gps_to_create = [StateIdx.V3]
     

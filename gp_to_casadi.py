@@ -63,8 +63,6 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     L = np.linalg.cholesky(K + noise * np.eye(len(x_train_norm)))
     y_centered = y_train - mean_const
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centered))
-    alpha = cs.DM(alpha)
-    x_train_norm = cs.DM(x_train_norm)
     k_star = rbf_kernel(cs.horzcat(x_norm, u_norm), x_train_norm, lengthscale, outputscale)
     mean = cs.mtimes(k_star, alpha) + mean_const
  
