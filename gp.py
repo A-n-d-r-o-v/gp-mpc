@@ -260,8 +260,10 @@ def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr):
         gp = DifferentialGP(input_dim=setting.input_dim, device=device, periodic_inputs=setting.periodic_inputs)
         input_data = setting.get_input(X_train)
         output_data = setting.get_output(Y_train)
+        print(f"Training gp for {setting.name}")
         gp.add_data(input_data, output_data)
         gp.train(training_iter, lr)
+        print("Converting to casadi")
         casadi_gp = get_xdot(gp, input_data, output_data, setting.control_dim)
         gps[idx] = gp
         casadi_gps[idx] = casadi_gp

@@ -194,7 +194,7 @@ def test_gps():
     training_iter = 100
     lr = 0.5
     dt = 0.01  # 100hz
-    N = 100
+    N = 1000
     X, Y = generate_data(N, RANGES)
     
     gpytorch.settings.eval_cg_tolerance._set_value(0)

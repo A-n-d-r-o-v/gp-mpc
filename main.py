@@ -10,6 +10,7 @@ from grid_point import GridPoint
 from ACADOSDJIMatrice import ACADODjiMatrice
 from old_main import construct_xdot
 import math
+import time
 
 import casadi as cs
 from gp_to_casadi import get_function_estimator, concatenate_inputs, split_inputs
@@ -98,7 +99,10 @@ def main():
 
             gridPoint = GridPoint(inS, fiS, name, id, group)
             nSegments = math.floor(finalTime / sampling_time)+1
+            start = time.time()
             traj = ACADODjiMatrice(inS, fiS, nSegments, finalTime, x_dot)
+            end = time.time()
+            print("Time to create trajectory:", end - start)
 
             save_primitive_to_file(group, id, name, traj)
 

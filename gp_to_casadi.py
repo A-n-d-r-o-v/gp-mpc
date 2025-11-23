@@ -2,38 +2,40 @@ import casadi as cs
 import numpy as np
 
 
+def rbf_kernel(X1, X2, lengthscale, outputscale):
+    # Scaled RBF kernel formula:
+    # outputscale * exp(-1/2 * ||x_di - x_dj||^2 / l_d^2))
+    n1, n2 = X1.shape[0], X2.shape[0]
+    lengthscale_sq = lengthscale**2
+    
+    # If we're working with CasADi matrices
+    if type(X1) is cs.SX or type(X2) is cs.SX:
+        # Vectorized squared distance computation
+        # ||x_i - x_j||^2 = ||x_i||^2 + ||x_j||^2 - 2*x_i^T*x_j
+        X1_sq = cs.sum2(X1**2)
+        X2_sq = cs.sum2(X2**2)
+        cross_term = cs.mtimes(X1, X2.T)
+        sq_dist = cs.SX.zeros(n1, n2)
+        for i in range(n1):
+            sq_dist[i, :] = X1_sq[i] + X2_sq.T - 2*cross_term[i, :]
+        kernel = outputscale * cs.exp(-0.5 * sq_dist / lengthscale_sq)
+        return kernel
+    
+    # Otherwise we can use numpy
+    kernel = np.zeros((n1, n2))
+    X1_sq = np.sum(X1**2, axis=1, keepdims=True)
+    X2_sq = np.sum(X2**2, axis=1, keepdims=True)
+    cross_term = X1 @ X2.T
+    
+    sq_dist = X1_sq + X2_sq.T - 2*cross_term
+    kernel = outputscale * np.exp(-0.5 * sq_dist / lengthscale_sq)
+    return kernel
+
+
 def get_xdot(gp_model, x_train, y_train, control_dim):
     state_dim = x_train.shape[1] - control_dim
-    x = cs.reshape(cs.MX.sym("x", state_dim), 1, -1) # State variables
-    u = cs.reshape(cs.MX.sym("u", control_dim), 1, -1) # Control variables
-    
-    def rbf_kernel(X1, X2, lengthscale, outputscale):
-        # Scaled RBF kernel formula:
-        # outputscale * exp(-1/2 * ||x_di - x_dj||^2 / l_d^2))
-        n1, n2 = X1.shape[0], X2.shape[0]
-        lengthscale_sq = lengthscale**2
-        
-        # If we're working with CasADi matrices
-        if type(X1) is cs.MX or type(X2) is cs.MX:
-            kernel = cs.MX.zeros(n1, n2)
-            for i in range(n1):
-                x_i = cs.reshape(X1[i,:], 1, X1.shape[1])
-                for j in range(n2):
-                    x_j = cs.reshape(X2[j,:], 1, X2.shape[1])
-                    dif = x_i - x_j
-                    kernel[i,j] = outputscale * cs.exp(-0.5 * cs.mtimes(dif, dif.T) / lengthscale_sq)
-            return kernel
-        
-        # Otherwise we can use numpy
-        kernel = np.zeros((n1, n2))
-        for i in range(n1):
-            x_i = X1[[i],:]
-            for j in range(n2):
-                x_j = X2[[j],:]
-                dif = x_i - x_j
-                kernel[i,j] = outputscale * np.exp(-0.5 * np.linalg.norm(dif)**2 / lengthscale_sq)
-        
-        return kernel
+    x = cs.SX.sym("x", 1, state_dim)
+    u = cs.SX.sym("u", 1, control_dim)
     
     # Normalize training data if it is not already normalized
     already_normalized = (x_train.min() >= -0.01) and (x_train.max() <= 1.01)
@@ -65,7 +67,7 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centered))
     k_star = rbf_kernel(cs.horzcat(x_norm, u_norm), x_train_norm, lengthscale, outputscale)
     mean = cs.mtimes(k_star, alpha) + mean_const
- 
+
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
 
 
