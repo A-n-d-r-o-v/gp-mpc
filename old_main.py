@@ -109,7 +109,7 @@ def construct_xdot():
     )
     training_iter = 300  #100
     lr = 0.01            #0.5
-    N = 500              #100
+    N = 1000              #100
     X, Y = generate_data(N, RANGES, lhs_random_state=1234)
     
     gpytorch.settings.eval_cg_tolerance._set_value(0)
@@ -164,14 +164,13 @@ def construct_xdot():
         # gp is a f(x, u) function. We need a f(X) to work with (simpler)
         gp_func = gp
         num_variables = len(states) + len(controls)
-
+        """
         gp_concat = concatenate_inputs(gp_func, len(states), len(controls))
         gp_est = get_function_estimator(gp_concat, [(-4, 15) for i in range(num_variables)])
         gp_split = split_inputs(gp_est, len(states), len(controls))
-        
         state_dot_list[idx] = gp_split(cs.vertcat(*states), cs.vertcat(*controls))
-
-        #state_dot_list[idx] = gp_func#
+        """
+        state_dot_list[idx] = gp_func(cs.vertcat(*states), cs.vertcat(*controls))
 
     for idx in set(StateIdx) - casadi_gps.keys():
         state_dot_list[idx] = known_dynamics[idx]

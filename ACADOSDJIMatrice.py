@@ -40,7 +40,7 @@ def dummy_calc_cost(ocp : AcadosOcp, acados_ocp_solver : AcadosOcpSolver):
     return total_cost
 
 
-def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float, x_dot) -> Trajectory:
+def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float, x_dot, generate = True) -> Trajectory:
     PI = 3.1415
     nsegments = nsegments - 1
     # Differential States
@@ -114,26 +114,31 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
 
     # Scale it (maybe correct)
     f_expl_expr_scaled = vertcat(T * f_expl_expr, 0)
+    minTime = finalTime*0.5
+    maxTime = finalTime*1.5
+
+    PARAM_NSEG = MX.sym("param_nseg", 1)
 
     # Create model
     model = AcadosModel()
     model.f_expl_expr = f_expl_expr_scaled
     model.x = x_state
     model.u = u_control
+
+    model.p_global = PARAM_NSEG
+
     model.name = "Quadcopter"
 
     # Begin to define ocp!
     ocp = AcadosOcp()
     ocp.model = model
 
-    #ocp.dims.N = nsegments
-    ocp.solver_options.N_horizon = nsegments
+    ocp.p_global_values = np.array([20.0])
+
+    ocp.solver_options.N_horizon = 20#nsegments#10## This is set later #nsegments
     ocp.solver_options.tf = 1.0
 
     # constraints
-    minTime = finalTime*0.5
-    maxTime = finalTime*1.5
-
     ocp.constraints.lbx = np.array([ # USE LBU AND UBU for control stuff
         -0.8*28*PI/180, # roll_ref
         -0.8*28*PI/180, # pitch_ref
@@ -141,7 +146,7 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
         -5, # vx
         -5, # vy
         -5, # vz
-        minTime 
+        1.0# temp. set later elsewhere minTime
     ])
 
     ocp.constraints.ubx = np.array([
@@ -151,7 +156,7 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
         5, # vx
         5, # vy
         5, # vz
-        maxTime
+        1.0# temp. set later elsewhere #maxTime
     ])
     
     # indeces for the constraints
@@ -159,54 +164,13 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
         9, 10, 11, 0, 1, 2, 15
     ])
 
-    # Setup initial conditions for (most) states BUT leave T free at initial node.
-    # Use idxbx_0 / lbx_0 / ubx_0 to constrain only the indices we want at the initial shooting node.
-    # We'll constrain all original 15 states at start (indices 0..14), but not the T_state (index 15). (we ignore this right now)
-    idxbx_0 = np.arange(16)
-    ocp.constraints.idxbx_0 = idxbx_0
-
-    x0_vals_lower = np.array([
-        start.vx, start.vy, start.vz,
-        start.roll, start.pitch, start.yaw,
-        start.x, start.y, start.z,
-        start.roll_ref, start.pitch_ref, start.thrust,
-        0.0, 0.0, 0.0,
-        minTime
-    ])
-    x0_vals_upper = np.array([
-        start.vx, start.vy, start.vz,
-        start.roll, start.pitch, start.yaw,
-        start.x, start.y, start.z,
-        start.roll_ref, start.pitch_ref, start.thrust,
-        0.0, 0.0, 0.0,
-        maxTime
-    ])
-
-    ocp.constraints.lbx_0 = x0_vals_lower
-    ocp.constraints.ubx_0 = x0_vals_upper
-
-    # end constraints
-    end_values_l = np.array([
-        end.vx, end.vy, end.vz, 
-        end.roll, end.pitch, end.yaw,
-        end.x, end.y, end.z,
-        end.roll_ref, end.pitch_ref, end.thrust,
-        0.0, 0.0, 0.0,
-        minTime
-    ])
-    end_values_u = np.array([
-        end.vx, end.vy, end.vz, 
-        end.roll, end.pitch, end.yaw,
-        end.x, end.y, end.z,
-        end.roll_ref, end.pitch_ref, end.thrust,
-        0.0, 0.0, 0.0,
-        maxTime
-    ])
-    ocp.constraints.lbx_e = end_values_l
-    ocp.constraints.ubx_e = end_values_u
-    ocp.constraints.idxbx_e = np.array([
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-    ])
+    # Set placeholder values. These will be set later
+    ocp.constraints.lbx_0 = np.zeros(16)
+    ocp.constraints.ubx_0 = np.zeros(16)
+    ocp.constraints.idxbx_0 = np.arange(16)
+    ocp.constraints.lbx_e = np.zeros(16)
+    ocp.constraints.ubx_e = np.zeros(16)
+    ocp.constraints.idxbx_e = np.arange(16)
 
     # OPTIMAL CONTROL PROBLEM
     cost_rpp       = roll_ref**2 + pitch_ref**2
@@ -214,7 +178,7 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
     cost_rppt_ddot = roll_ref_ddot**2 + pitch_ref_ddot**2 + thrust_ddot**2
 
     time_smooth_ratio = 4
-    lagrange_expr = (1.0 / nsegments) * (1/time_smooth_ratio) * (1*cost_rpp + 1*cost_rppt_dot + 0.5*cost_rppt_ddot)
+    lagrange_expr = (1.0 / PARAM_NSEG) * (1/time_smooth_ratio) * (1*cost_rpp + 1*cost_rppt_dot + 0.5*cost_rppt_ddot)
 
     # Lagrange cost
     ocp.cost.cost_type = "EXTERNAL"
@@ -222,19 +186,9 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
     ocp.model.cost_expr_ext_cost = lagrange_expr
 
     # Mayer (terminal) cost
-    ocp.model.cost_expr_ext_cost_e = T# * T #SX(1.0)  # equivalent to minimizeMayerTerm(T)
+    ocp.model.cost_expr_ext_cost_e = T
 
     # Solve things!
-    """
-    ocp.solver_options.qp_solver = "FULL_CONDENSING_QPOASES"    # ACADO uses "FULL_CONDENSING_QPOASES" (?)
-    ocp.solver_options.hessian_approx = "EXACT"                  # same idea
-    ocp.solver_options.integrator_type = "ERK"                   # explicit Runge–Kutta
-    ocp.solver_options.nlp_solver_type = "SQP"                   # full SQP
-    ocp.solver_options.nlp_solver_max_iter = 400
-    ocp.solver_options.qp_solver_iter_max = 500
-    """
-
-    #"""
     ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'#'FULL_CONDENSING_QPOASES'#'PARTIAL_CONDENSING_HPIPM' # FULL_CONDENSING_QPOASES
     ocp.solver_options.integrator_type = 'ERK'
     ocp.solver_options.nlp_solver_type = 'SQP'
@@ -243,22 +197,33 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
     ocp.solver_options.nlp_solver_tol_stat = 1e-6
     ocp.solver_options.sim_method_num_steps = 30
     ocp.solver_options.qp_solver_iter_max = 450
-    # new thing
+    
     ocp.solver_options.num_stages = 4
     ocp.solver_options.num_steps = 6
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
-    #"""
-
 
     # DONT PRINT
     ocp.solver_options.print_level = 0
     ocp.solver_options.qp_solver_verbosity = 1
 
-    solver = AcadosOcpSolver(ocp, verbose=False)
+    # Store acados model. We DO NOT want to recompile every time.... It will take forever with lots of data...
+    solver_json = 'acados_ocp_' + ocp.model.name + '.json'
+    if generate:
+        # (re)compile and do new stuff.
+        solver = AcadosOcpSolver(ocp, json_file=solver_json, build=True, generate=True, verbose=False)
+    else:
+        # get from saved files
+        solver = AcadosOcpSolver(ocp, json_file=solver_json, build=False, generate=False, verbose=False)
+
+    p_global_values = np.array([float(nsegments)])
+    solver.set_p_global_and_precompute_dependencies(p_global_values)
 
     # warm-start
     # Linear interpolation between start and end states
     if True:
+        # set time horizon
+        solver.set_new_time_steps(np.tile(1.0/nsegments, (nsegments,)))
+
         x0_start = np.array([
             start.vx, start.vy, start.vz,
             start.roll, start.pitch, start.yaw,
@@ -276,16 +241,39 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
             finalTime
         ])
 
+        # set warm start values.
         for k in range(nsegments+1):
             alpha = k / nsegments
             x_guess = (1 - alpha) * x0_start + alpha * xn_end
             solver.set(k, "x", x_guess)
 
+            # also update min/max time constraint
+            if (True):#k != 1 and k != nsegments):
+                lval = solver.constraints_get(k, "lbx")
+                lval[-1] = minTime
+                solver.constraints_set(k, "lbx", lval)
+
+                uval = solver.constraints_get(k, "ubx")
+                uval[-1] = maxTime
+                solver.constraints_set(k, "ubx", uval)
+
+        x0_start[15] = minTime
+        solver.set(0, "lbx", x0_start)
+        x0_start[15] = maxTime
+        solver.set(0, "ubx", x0_start)
+
+        xn_end[15] = minTime
+        solver.set(nsegments, "lbx", xn_end)
+        xn_end[15] = maxTime
+        solver.set(nsegments, "ubx", xn_end)
+        
+
     status = solver.solve()
     solved_successfully = status == 0
 
-    print("dummy dum dum", dummy_calc_cost(ocp, solver), "actual cost", solver.get_cost())
-
+    #print("dummy dum dum", dummy_calc_cost(ocp, solver), "actual cost", solver.get_cost())
+    print("Cost:", solver.get_cost())
+    
     traj = Trajectory(solver, start, end, solved_successfully)
     #print(traj)
     return traj

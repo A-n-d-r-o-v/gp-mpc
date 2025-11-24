@@ -74,6 +74,7 @@ def main():
     number_of_groups = 14
     sampling_time = 0.1 # 50 Hz
     x_dot = construct_xdot()
+    shouldGenerate = True
 
     for group in range(0, number_of_groups+1):
         lattice_file = "config/lattice_group" + str(group) + ".txt"
@@ -100,7 +101,10 @@ def main():
             gridPoint = GridPoint(inS, fiS, name, id, group)
             nSegments = math.floor(finalTime / sampling_time)+1
             start = time.time()
-            traj = ACADODjiMatrice(inS, fiS, nSegments, finalTime, x_dot)
+            
+            traj = ACADODjiMatrice(inS, fiS, nSegments, finalTime, x_dot, shouldGenerate)
+            shouldGenerate = False
+
             end = time.time()
             print("Time to create trajectory:", end - start)
 
