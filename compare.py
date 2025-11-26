@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-GOLD_PATH = "primitives_gold/"
-COMPARE_PATH = "primitives/"
+#GOLD_PATH = "primitives_gold/"
+GOLD_PATH = "primitives_acados_standard/"
+COMPARE_PATH = "primitives_all_gp/"
 
 def read_primitive_into_matrix(path : str)->np.array:
     arr = []
@@ -25,32 +26,36 @@ def read_primitive_into_matrix(path : str)->np.array:
     
 
 def compare_primitives(group, id):
-    file_name = "primitive_group_" + str(group) + "_id_" + str(id) + ".txt"
-    v1 = read_primitive_into_matrix(GOLD_PATH + file_name)
-    v2 = read_primitive_into_matrix(COMPARE_PATH + file_name)
+    try:
+        file_name = "primitive_group_" + str(group) + "_id_" + str(id) + ".txt"
+        v1 = read_primitive_into_matrix(GOLD_PATH + file_name)
+        v2 = read_primitive_into_matrix(COMPARE_PATH + file_name)
 
-    # path error
-    path1 = v1[16:]
-    path1 = path1.reshape((int(path1.size / 11), 11))
-    path2 = v2[16:]
-    path2 = path2.reshape((int(path2.size / 11), 11))
+        # path error
+        path1 = v1[16:]
+        path1 = path1.reshape((int(path1.size / 11), 11))
+        path2 = v2[16:]
+        path2 = path2.reshape((int(path2.size / 11), 11))
 
-    if (path1.shape != path2.shape):
-        print(group, id, "failed! Non-matching path-shapes")
+        if (path1.shape != path2.shape):
+            print(group, id, "failed! Non-matching path-shapes")
+            return (-1, -1, -1)
+
+        row_diff_mean = np.mean(np.abs(path1 - path2), axis=1)
+        #print(row_diff_mean)
+
+        path_error = np.mean(row_diff_mean)
+
+        # Cost error (relative error)
+        cost_error = (v2[3] - v1[3]) / abs(v1[3])
+
+        # Time error (relative error)
+        time_error = (v2[2] - v1[2]) / abs(v1[2])
+
+        return (path_error, cost_error, time_error)
+    except:
+        print("unknown error at ", group, id)
         return (-1, -1, -1)
-
-    row_diff_mean = np.mean(np.abs(path1 - path2), axis=1)
-    #print(row_diff_mean)
-
-    path_error = np.mean(row_diff_mean)
-
-    # Cost error (relative error)
-    cost_error = (v2[3] - v1[3]) / abs(v1[3])
-
-    # Time error (relative error)
-    time_error = (v2[2] - v1[2]) / abs(v1[2])
-
-    return (path_error, cost_error, time_error)
 
 def findGroupAndIDFromIndex(groups, index):
     for g, i in enumerate(groups):

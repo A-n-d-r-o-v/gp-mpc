@@ -124,9 +124,8 @@ def construct_xdot():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("training on device ", device)
 
-    # gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
-    #gps_to_create = [StateIdx.PITCH, StateIdx.ROLL]
-    gps_to_create = [StateIdx.V3]
+    gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
+    #gps_to_create = []
     
     gp_settings = create_gp_settings(gps_to_create)
     print("training")
@@ -164,13 +163,13 @@ def construct_xdot():
         # gp is a f(x, u) function. We need a f(X) to work with (simpler)
         gp_func = gp
         num_variables = len(states) + len(controls)
-        """
+        #"""
         gp_concat = concatenate_inputs(gp_func, len(states), len(controls))
         gp_est = get_function_estimator(gp_concat, [(-4, 15) for i in range(num_variables)])
         gp_split = split_inputs(gp_est, len(states), len(controls))
         state_dot_list[idx] = gp_split(cs.vertcat(*states), cs.vertcat(*controls))
-        """
-        state_dot_list[idx] = gp_func(cs.vertcat(*states), cs.vertcat(*controls))
+        #"""
+        #state_dot_list[idx] = gp_func(cs.vertcat(*states), cs.vertcat(*controls))
 
     for idx in set(StateIdx) - casadi_gps.keys():
         state_dot_list[idx] = known_dynamics[idx]

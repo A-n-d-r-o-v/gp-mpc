@@ -94,23 +94,25 @@ def ACADODjiMatrice(start : State, end : State, nsegments:int, finalTime: float,
     g = 9.8066
     
     f_expl_expr = x_dot(x_state_for_gp, u_control)
-    # f_expl_expr = vertcat(
-    #     (cos(roll)*cos(yaw)*sin(pitch) + sin(roll)*sin(yaw))*thrust - vx * linear_drag_coefficient1,
-    #     (cos(roll)*sin(pitch)*sin(yaw) - cos(yaw)*sin(roll))*thrust - vy * linear_drag_coefficient2,
-    #     (-g + cos(pitch)*cos(roll)*thrust),
-    #     (roll_gain*roll_ref - roll)/roll_tau,
-    #     (pitch_gain*pitch_ref - pitch)/pitch_tau,
-    #     0,
-    #     vx,
-    #     vy,
-    #     vz,
-    #     roll_ref_dot,
-    #     pitch_ref_dot,
-    #     thrust_dot,
-    #     roll_ref_ddot,
-    #     pitch_ref_ddot,
-    #     thrust_ddot
-    # )
+    """
+    f_expl_expr = vertcat(
+        (cos(roll)*cos(yaw)*sin(pitch) + sin(roll)*sin(yaw))*thrust - vx * linear_drag_coefficient1,
+        (cos(roll)*sin(pitch)*sin(yaw) - cos(yaw)*sin(roll))*thrust - vy * linear_drag_coefficient2,
+        (-g + cos(pitch)*cos(roll)*thrust),
+        (roll_gain*roll_ref - roll)/roll_tau,
+        (pitch_gain*pitch_ref - pitch)/pitch_tau,
+        0,
+        vx,
+        vy,
+        vz,
+        roll_ref_dot,
+        pitch_ref_dot,
+        thrust_dot,
+        roll_ref_ddot,
+        pitch_ref_ddot,
+        thrust_ddot
+    )
+    """
 
     # Scale it (maybe correct)
     f_expl_expr_scaled = vertcat(T * f_expl_expr, 0)
