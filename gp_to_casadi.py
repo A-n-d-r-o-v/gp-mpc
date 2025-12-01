@@ -9,15 +9,13 @@ def rbf_kernel(X1, X2, lengthscale, outputscale):
     lengthscale_sq = lengthscale**2
     
     # If we're working with CasADi matrices
-    if type(X1) is cs.SX or type(X2) is cs.SX:
+    if type(X1) is cs.SX or type(X2) is cs.SX or type(X1) is cs.MX or type(X2) is cs.MX:
         # Vectorized squared distance computation
         # ||x_i - x_j||^2 = ||x_i||^2 + ||x_j||^2 - 2*x_i^T*x_j
         X1_sq = cs.sum2(X1**2)
         X2_sq = cs.sum2(X2**2)
         cross_term = cs.mtimes(X1, X2.T)
-        sq_dist = cs.SX.zeros(n1, n2)
-        for i in range(n1):
-            sq_dist[i, :] = X1_sq[i] + X2_sq.T - 2*cross_term[i, :]
+        sq_dist = X1_sq + X2_sq.T - 2 * cross_term
         kernel = outputscale * cs.exp(-0.5 * sq_dist / lengthscale_sq)
         return kernel
     
@@ -34,8 +32,8 @@ def rbf_kernel(X1, X2, lengthscale, outputscale):
 
 def get_xdot(gp_model, x_train, y_train, control_dim):
     state_dim = x_train.shape[1] - control_dim
-    x = cs.SX.sym("x", 1, state_dim)
-    u = cs.SX.sym("u", 1, control_dim)
+    x = cs.MX.sym("x", 1, state_dim)
+    u = cs.MX.sym("u", 1, control_dim)
     
     # Normalize training data if it is not already normalized
     already_normalized = (x_train.min() >= -0.01) and (x_train.max() <= 1.01)
@@ -67,7 +65,9 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centered))
     k_star = rbf_kernel(cs.horzcat(x_norm, u_norm), x_train_norm, lengthscale, outputscale)
     mean = cs.mtimes(k_star, alpha) + mean_const
-
+    # func = cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
+    # print(f"Number of instructions: {func.n_instructions()}")
+    # return func
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
 
 
