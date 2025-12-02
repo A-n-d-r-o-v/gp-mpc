@@ -65,9 +65,6 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centered))
     k_star = rbf_kernel(cs.horzcat(x_norm, u_norm), x_train_norm, lengthscale, outputscale)
     mean = cs.mtimes(k_star, alpha) + mean_const
-    # func = cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
-    # print(f"Number of instructions: {func.n_instructions()}")
-    # return func
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
 
 
