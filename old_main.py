@@ -237,6 +237,65 @@ def test_gps():
         plt.savefig(f"gp_mean_comparison_dim{i}.png")
 
 
+def test_gps_with_variances():
+    params = Params(
+        g=9.8066,
+        roll_gain=1.101, roll_tau=0.253,
+        pitch_gain=1.097, pitch_tau=0.267,
+        dragacc1=0.01, dragacc2=0.01
+    )
+
+    training_iter = 100
+    lr = 0.5
+    dt = 0.01  # 100hz
+    N = 500
+    X, Y = generate_data(N, RANGES)
+    
+    gpytorch.settings.eval_cg_tolerance._set_value(0)
+    gpytorch.settings.max_cg_iterations._set_value(100000)
+    
+    test_size = 0.2
+    test_count = int(N * test_size)
+    test_idx = np.arange(N)[:test_count]
+    train_idx = np.arange(N)[test_count:]
+
+    X_train, Y_train = X[train_idx], Y[train_idx]
+    X_test, Y_test = X[test_idx], Y[test_idx]
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    gps_to_create = [StateIdx.V1, StateIdx.V2, StateIdx.V3, StateIdx.ROLL, StateIdx.PITCH]
+    gp_settings = create_gp_settings(gps_to_create)
+    print("training")
+    gps, casadi_gps = create_gps(gp_settings, device, X_train, Y_train, training_iter, lr, variances=True)
+    
+    print("simulating")
+    
+    for i, gp in gps.items():
+        casadi_preds = [casadi_gps[i](x[gp_settings[i].state_indices], x[gp_settings[i].control_indices]) for x in X_test]
+        
+        casadi_mean = np.array([p[0].full().item() for p in casadi_preds])
+        casadi_var  = np.array([p[1].full().item() for p in casadi_preds])
+        gp_mean, gp_var = gp.predict(gp_settings[i].get_input(X_test))
+        
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(gp_mean, "o-", markersize=4, label="GP mean")
+        plt.plot(casadi_mean, "x--", markersize=4, label="CasADi mean")
+        plt.title(f"Mean: Output dimension {i}")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(gp_var, "o-", markersize=4, label="GP variance")
+        plt.plot(casadi_var, "x--", markersize=4, label="CasADi variance")
+        plt.title(f"Variance: Output dimension {i}")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(f"gp_mean_comparison_dim{i}.png")
+
 if __name__ == "__main__":
     test_gps()
     

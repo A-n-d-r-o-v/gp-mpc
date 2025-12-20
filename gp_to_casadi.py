@@ -30,7 +30,7 @@ def rbf_kernel(X1, X2, lengthscale, outputscale):
     return kernel
 
 
-def get_xdot(gp_model, x_train, y_train, control_dim):
+def get_xdot(gp_model, x_train, y_train, control_dim, return_variance=False):
     state_dim = x_train.shape[1] - control_dim
     x = cs.MX.sym("x", 1, state_dim)
     u = cs.MX.sym("u", 1, control_dim)
@@ -65,8 +65,16 @@ def get_xdot(gp_model, x_train, y_train, control_dim):
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centered))
     k_star = rbf_kernel(cs.horzcat(x_norm, u_norm), x_train_norm, lengthscale, outputscale)
     mean = cs.mtimes(k_star, alpha) + mean_const
+    
+    if return_variance:
+        v = cs.solve(L, k_star.T)
+        variance = outputscale - cs.mtimes(v.T, v)
+        # This is only used for comparison, when using the variance in ACADOS we don't want the noise, it's just a constant
+        # variance = outputscale - cs.mtimes(v.T, v) + noise
+        return cs.Function("x_dot", [x, u], [mean, variance], ["x", "u"], ["mean", "variance"])
+    
     return cs.Function("x_dot", [x, u], [mean], ["x", "u"], ["x_dot"])
-
+    
 
 def split_inputs(f_cat: cs.Function, x_size: int, u_size: int):
     """

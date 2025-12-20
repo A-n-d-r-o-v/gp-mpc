@@ -251,7 +251,7 @@ class MultiGP:
         return mu, var
 
 
-def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr):
+def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr, variances=False):
     """Create and train GPs for all given GP settings and translate to CasADi, return GP and CasADi representations in dictionaries"""
     gps = {}
     casadi_gps = {}
@@ -263,8 +263,9 @@ def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr):
         print(f"Training gp for {setting.name}")
         gp.add_data(input_data, output_data)
         gp.train(training_iter, lr)
+        gp.model.double() # This prevents a small error between the GP and CasADi variance model
         print("Converting to casadi")
-        casadi_gp = get_xdot(gp, input_data, output_data, setting.control_dim)
+        casadi_gp = get_xdot(gp, input_data, output_data, setting.control_dim, variances)
         gps[idx] = gp
         casadi_gps[idx] = casadi_gp
 
