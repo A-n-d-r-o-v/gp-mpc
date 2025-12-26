@@ -1,18 +1,29 @@
 import numpy as np
 import torch
-from dataclasses import dataclass, asdict, fields
-from enum import IntEnum
+from dataclasses import asdict, fields
+#from enum import IntEnum
+from dataclasses import asdict, fields
+from typing import ClassVar, TypeVar, Type
 
 
 class ODEData:
+    """
+    This is a generic base for dataclasses like State, Input, etc, to inherit from.
+    It provides a number of methods to handle things like type conversions,
+    mathematical operations, etc.
+    """
 
-    # DIM: ClassVar[int] = 0 # Number of class variables. Computed in post_init
+    T = TypeVar("T", bound="ODEData")
+    DIM: ClassVar[int] = 0 # Number of class variables. Computed in post_init
 
     def __init__(self):
         for f in fields(self):
             setattr(self, f.name, 0.0)
-        # self.DIM = len(fields(self))
-        # DIM = self.DIM
+
+    def __post_init__(self):
+        cls = self.__class__
+        if cls.DIM == 0:
+            cls.DIM = len(fields(cls))    
         
     def as_numpy(self) -> np.ndarray:
         """Convert to numpy."""
@@ -24,7 +35,7 @@ class ODEData:
         """Convert back to class type from numpy."""
         return cls(*vec.tolist())
 
-    def as_tensor(self, dtype=torch.float32, device=None):
+    def as_tensor(self, dtype=torch.float64, device=None):
         """Convert to torch tensor."""
         values = [
             getattr(self, f.name)
@@ -49,14 +60,71 @@ class ODEData:
     def difference_dict(self, other) -> dict:
         """Return element-wise differences as a dict."""
         return self.difference(other).as_dict()
+    
+    @classmethod
+    def _validate_field_dict(cls, d: dict, raise_missing_field_error = True) -> bool:
+        """
+        Check that a dictionary d that maps {"var_name" -> value} contains
+        all the corresponding fields defined in the dataclass.
+        Optionally avoid raising an error for a missing field. 
+        
+        :param cls:
+        :param d: The dictionary mapping {"state_var_name" -> value}.
+        :type d: dict
+        :param raise_missing_field_error: Raise an error if a field is missing from the dict.
+        :return: Whether the provided dict fully matches the fields in State.
+        :rtype: bool
+        """
+        fields_set = set(cls.__dataclass_fields__.keys())
+        keys_set = set(d.keys())
+
+        missing = fields_set - keys_set
+        extra = keys_set - fields_set
+
+        if missing:
+            if raise_missing_field_error:
+                raise ValueError(f"Missing dict key(s) for: {missing}")
+            else: 
+                print(f"Warning: Missing dict key(s) for: {missing}")
+        if extra:
+            raise ValueError(f"Unknown dict key(s): {extra}")
+        
+        return not missing and not extra
 
     @classmethod
-    def zero(cls) -> "State":
-        """Return a zero-init state."""
-        # return cls()
-        return cls.from_numpy(np.zeros(len(fields(cls))))
+    def from_dict(cls: type["ODEData"], d: dict[str, float], fill_missing: bool = False) -> "ODEData":
+        """
+        Convert a dictionary to an instance of this dataclass.
+        """
+        if not fill_missing:
+            cls._validate_state_dict(d, raise_missing_field_error=True)
+        else:
+            # Fill missing keys with 0
+            fields_set = set(cls.__dataclass_fields__.keys())
+            for key in fields_set:
+                d.setdefault(key, 0.0)
+
+            # Check for extra keys
+            extra_keys = set(d.keys()) - fields_set
+            if extra_keys:
+                raise ValueError(f"Unknown dict key(s): {extra_keys}")
+
+        return cls(**d)
 
 
+    @classmethod
+    def zero(cls: Type[T]) -> T: # Use the type of whatever inherits this class
+        """
+        Return a zero-init state. 
+        NOTE: Sets each cls field to 0.0 which currently is fine as
+        we assume everything is float... This needs to be looked over 
+        if this assumption changes in the future.
+        """
+        return cls(**{f.name: 0.0 for f in fields(cls)})
+    
+
+
+"""
 @dataclass
 class State(ODEData):
     v1: float
@@ -123,3 +191,8 @@ class InputIdx(IntEnum):
     ROLL_REF_DDOT = 0
     PITCH_REF_DDOT = 1
     THRUST_DDOT = 2
+        :param d: Dictionary mapping {"var_name" -> value}
+        :param fill_missing: If True, missing keys are initialized to 0 instead of raising an error
+        :return: Instance of cls
+
+"""

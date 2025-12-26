@@ -1,9 +1,187 @@
-from data import *
-from typing import Callable, List, Dict, Any
-from gp import DifferentialGP
+#from data import * # oof..
+from typing import Callable, List, Type, TypeVar, ClassVar, Optional
+from dataclasses import dataclass, asdict, fields
+from gp import min_max_norm
+from math import pi 
+from data import ODEData
+
+import numpy as np
+import torch
+
+from abc import abstractmethod
+
+#Perturbation = Callable[[State, Input, Params, State], State]
 
 
-Perturbation = Callable[[State, Input, Params, State], State]
+class ODEModel:
+    """
+    Generic base class for an ODE model that is described by ..
+    """
+
+    # An ODE model needs the following classes that all inherit from ODEData.
+    State: Type[ODEData] = None
+    Input: Type[ODEData] = None
+    Params: Type[ODEData] = None
+
+    def __init__(self, name: str = None):
+        self.name = name
+
+    @abstractmethod
+    def differentiate(
+            self,
+            state, 
+            input, 
+            params,
+            diff_gps: Optional[List] = None
+            #perturbations: List[Perturbation] = None # TODO !!
+        ) -> ODEData:
+        raise NotImplementedError("Not callable from superclass; must be overridden")
+    
+    @abstractmethod
+    def position(self, state):
+        raise NotImplementedError("Not callable from superclass; must be overridden")
+    
+    @abstractmethod
+    def orientation(self, state):
+        raise NotImplementedError("Not callable from superclass; must be overridden")
+    
+    # TODO: add ACADOS stuff, like cost, ...
+    
+    #def position(self, state):
+    #    raise NotImplementedError("Not callable from superclass; must be overridden")
+
+    '''
+    def dynamics_analytical(
+            self,
+            state, 
+            input, 
+            params 
+            #diff_gps: List[Perturbation] = None # TODO !!
+        ) -> dict[str, float]:
+        raise NotImplementedError("Not callable from superclass; must be overridden")
+    '''
+
+
+# {State.V1: {"idx": 4, "gp": gp_obj_hash} }
+
+
+class DJIMatrice100(ODEModel):
+    
+    @dataclass 
+    class MatriceState(ODEData):
+        v1: float
+        v2: float # 1
+        v3: float # 2
+        roll: float # 3
+        pitch: float
+        yaw: float # 5
+        p1: float
+        p2: float # 7
+        p3: float # 8
+        roll_ref: float # 9
+        pitch_ref: float 
+        thrust: float # 11
+        roll_ref_dot: float # 12
+        pitch_ref_dot: float
+        thrust_dot: float
+
+    @dataclass 
+    class MatriceInput(ODEData):
+        roll_ref_ddot: float
+        pitch_ref_ddot: float
+        thrust_ddot: float
+        
+    @dataclass(frozen=True)
+    class MatriceParams(ODEData):
+        g: float
+        roll_gain: float
+        roll_tau: float
+        pitch_gain: float
+        pitch_tau: float
+        dragacc1: float
+        dragacc2: float
+
+    State = MatriceState
+    Input = MatriceInput
+    Params = MatriceParams
+
+    def differentiate(self, state, input, params, diff_gps = None):
+        #return super().differentiate(state, input, params, diff_gps)
+       
+        # ----------- #
+        # -- State -- #
+        # ----------- #
+        # Velocity
+        v1, v2, v3 = state.v1, state.v2, state.v3 
+
+        # Orientation
+        roll, pitch, yaw = state.roll, state.pitch, state.yaw 
+
+        # Position
+        p1, p2, p3 = state.p1, state.p2, state.p3 
+
+        # Ref
+        roll_ref, pitch_ref = state.roll_ref, state.pitch_ref
+
+        # Ref dot
+        roll_ref_dot, pitch_ref_dot = state.roll_ref_dot, state.pitch_ref_dot
+        
+        # Thrust
+        thrust, thrust_dot = state.thrust, state.thrust_dot 
+
+        # ----------- #
+        # -- Input -- #
+        # ----------- #
+        roll_ref_ddot = input.roll_ref_ddot
+        pitch_ref_ddot = input.pitch_ref_ddot
+        thrust_ddot = input.thrust_ddot
+
+        # ------------ #
+        # -- Params -- #
+        # ------------ #
+        g = params.g
+        roll_gain = params.roll_gain
+        roll_tau = params.roll_tau
+        pitch_gain = params.pitch_gain
+        pitch_tau = params.pitch_tau
+        dragacc1 = params.dragacc1
+        dragacc2 = params.dragacc2
+
+        # -------------- #
+        # -- Dynamics -- #
+        # -------------- #
+        analytical_dot = {
+            "v1": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1,
+            "v2": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2,
+            "v3": -g + np.cos(pitch) * np.cos(roll) * thrust,
+            "roll": (roll_gain * roll_ref - roll) / roll_tau,
+            "pitch": (pitch_gain * pitch_ref - pitch) / pitch_tau,
+            "yaw": 0.0,
+            "p1": v1, "p2": v2, "p3": v3,
+
+            # Reference dynamics
+            "roll_ref": roll_ref_dot,
+            "pitch_ref": pitch_ref,
+            "thrust": thrust_dot,
+
+            # Second derivatives = input
+            "roll_ref_dot": roll_ref_ddot,
+            "pitch_ref_dot": pitch_ref_ddot,
+            "thrust_dot": thrust_ddot
+        }
+
+        self.State._validate_field_dict(analytical_dot) # check that everything is there...
+
+        # TODO: Call diff_gps
+
+        
+
+    #def __init__(self, name: str = None):
+    #    super().__init__(name=name)
+
+
+
+'''
 
 def differentiate(state: State, 
                   input: Input, 
@@ -39,10 +217,12 @@ def differentiate(state: State,
     v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1
     v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2
     v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
+    #print(f"v3_act: {v3_dot}, pitch: {pitch}, roll: {roll},  thrust: {thrust}")
 
     # rotational dynamics
     roll_dot = (roll_gain * roll_ref - roll) / roll_tau
     pitch_dot = (pitch_gain * pitch_ref - pitch) / pitch_tau
+    # print(f"roll_dot_roll: {roll_dot}, roll: {roll},  roll_ref: {roll_ref}")
     yaw_dot = 0.0
 
     # position dynamics
@@ -302,3 +482,6 @@ def step_features(X: np.ndarray, params: Params, dt: float) -> np.ndarray:
     states = X[:, :State.DIM]
     state_dots = differentiate_features(X, params)
     return states + state_dots * dt
+
+    
+    '''
