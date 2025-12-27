@@ -1,12 +1,12 @@
 #from data import * # oof..
-from typing import Callable, List, Type, TypeVar, ClassVar, Optional
-from dataclasses import dataclass, asdict, fields
-from gp import min_max_norm
-from math import pi 
+from typing import List, Type, Optional
+from dataclasses import dataclass
+#from gp import min_max_norm
+#from math import pi 
 from data import ODEData
 
 import numpy as np
-import torch
+#import torch
 
 from abc import abstractmethod
 
@@ -151,8 +151,8 @@ class DJIMatrice100(ODEModel):
         # -- Dynamics -- #
         # -------------- #
         analytical_dot = {
-            "v1": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1,
-            "v2": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2,
+            "v1": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1, # * v1 ? 
+            "v2": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2, # * v2 ?
             "v3": -g + np.cos(pitch) * np.cos(roll) * thrust,
             "roll": (roll_gain * roll_ref - roll) / roll_tau,
             "pitch": (pitch_gain * pitch_ref - pitch) / pitch_tau,
@@ -172,7 +172,21 @@ class DJIMatrice100(ODEModel):
 
         self.State._validate_field_dict(analytical_dot) # check that everything is there...
 
-        # TODO: Call diff_gps
+        # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
+        if diff_gps:
+            for var_id in diff_gps:
+                if not var_id in analytical_dot:
+                    raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
+                analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
+
+        # ------------------ #
+        # -- Result state -- #
+        # ------------------ #
+        res_state = self.State.from_dict(analytical_dot)
+
+        # TODO: Apply optional perturbations
+
+        return res_state
 
         
 

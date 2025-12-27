@@ -72,7 +72,7 @@ class ODEData:
         :param d: The dictionary mapping {"state_var_name" -> value}.
         :type d: dict
         :param raise_missing_field_error: Raise an error if a field is missing from the dict.
-        :return: Whether the provided dict fully matches the fields in State.
+        :return: Whether the set of keys in the provided dict fully matches the set of dataclass fields.
         :rtype: bool
         """
         fields_set = set(cls.__dataclass_fields__.keys())
@@ -123,6 +123,8 @@ class ODEData:
         return cls(**{f.name: 0.0 for f in fields(cls)})
     
 
+
+# The code below is the old version for reference
 
 """
 @dataclass
