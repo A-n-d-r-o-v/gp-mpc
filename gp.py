@@ -92,6 +92,9 @@ def create_gp_settings(gps):
     return gp_settings
 
 
+
+
+"""
 # When you predic you want to set a known min max values such that the 
 # value to predic is scaled in accordance with the training data
 def min_max_norm(data, set_min=None, set_max=None):
@@ -102,8 +105,20 @@ def min_max_norm(data, set_min=None, set_max=None):
         min = np.min(data)
         max = np.max(data)
     
-    return (data - min)/(max - min)
+    return (data - min)/(max - min) if min != max else data
+"""
 
+class GPBase(gpytorch.models.ExactGP):
+     def __init__(self, train_x, train_y, likelihood):
+        super().__init__(train_x, train_y, likelihood)
+
+    # Predict
+    # AddData (or handle this in DataLoader)
+    # ...
+
+
+# Make SingleOutputGP and MultiOutputGP inherit from GPBase and move logic there.
+# What do we do with DifferentialGP ? Maybe split into DataLoader and pick the appropriate GP? Or maybe this is just our new GPBase?
 
 class SingleOutputGP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
@@ -128,7 +143,10 @@ class DifferentialGP:
 
         self.X_min_max = []
 
-    def add_data(self, X_new: np.ndarray, Y_new: np.ndarray):
+        self.X_test = []
+        self.Y_test = []
+
+    def add_data(self, X_new: np.ndarray, Y_new: np.ndarray, normalize=True, test=False):
 
         # Init min max array
         self.X_min_max = np.zeros((X_new.shape[1], 2))
@@ -142,13 +160,52 @@ class DifferentialGP:
 
             self.X_min_max[i, 0] = np.min(X_new[:,i])
             self.X_min_max[i, 1] = np.max(X_new[:,i]) 
-            X_new[:,i] = self.min_max_norm(X_new[:,i], self.X_min_max[i, 0], self.X_min_max[i, 1])
+            if normalize:
+                X_new[:,i] = self.min_max_norm(X_new[:,i], self.X_min_max[i, 0], self.X_min_max[i, 1])
 
-        self.X.append(torch.tensor(X_new, dtype=torch.float32, device=self.device))
-        self.Y.append(torch.tensor(Y_new, dtype=torch.float32, device=self.device))
+        if test:
+            self.X_test.append(torch.tensor(X_new, dtype=torch.float64, device=self.device))
+            self.Y_test.append(torch.tensor(Y_new, dtype=torch.float64, device=self.device))
+        else:
+            self.X.append(torch.tensor(X_new, dtype=torch.float64, device=self.device))
+            self.Y.append(torch.tensor(Y_new, dtype=torch.float64, device=self.device))
     
     def min_max_norm(self, data, min, max):
         return (data - min)/(max - min) 
+    
+    def clear_data(self):
+        self.X = []
+        self.Y = []
+        self.X_test = []
+        self.Y_test = []
+        self.X_min_max = []
+        self.model = None
+        self.likelihood = None
+    
+    def print_hyperparameters(self):
+        if self.model is None:
+            print("Model not trained yet.")
+            return
+
+        print(f"GP Hyperparameters for model on device {self.device}:")
+        # Assuming SingleOutputGP uses a standard RBF kernel with outputscale
+        kernel = self.model.covar_module
+        if hasattr(kernel, "base_kernel"):
+            # For ScaleKernel(RBFKernel())
+            lengthscale = kernel.base_kernel.lengthscale.detach().cpu().numpy()
+            outputscale = kernel.outputscale.detach().cpu().numpy()
+        else:
+            lengthscale = kernel.lengthscale.detach().cpu().numpy()
+            outputscale = getattr(kernel, "outputscale", None)
+            if outputscale is not None:
+                outputscale = outputscale.detach().cpu().numpy()
+
+        # Noise from likelihood
+        noise = self.likelihood.noise.detach().cpu().numpy()
+
+        print(f"  Lengthscale: {lengthscale}")
+        print(f"  Outputscale: {outputscale}")
+        print(f"  Noise: {noise}")
 
     def train(self, training_iter=50, lr=0.1):
         train_x = torch.cat(self.X, dim=0)
@@ -171,7 +228,7 @@ class DifferentialGP:
             optimizer.step()
 
     def predict(self, X_new: np.ndarray):
-        test_x = torch.tensor(X_new, dtype=torch.float32, device=self.device)
+        test_x = torch.tensor(X_new, dtype=torch.float64, device=self.device)
 
         for i in range(test_x.shape[1]):
             # periodic inputs are assumed to repeat with frequency of 2 pi
@@ -189,6 +246,7 @@ class DifferentialGP:
         return mu, var
 
 
+
 class MultiGP:
     def __init__(self, input_dim, output_dim, device="cpu"):
         self.input_dim = input_dim # Not really used
@@ -202,8 +260,8 @@ class MultiGP:
         self.likelihoods = []
 
     def add_data(self, X_new: np.ndarray, Y_new: np.ndarray):
-        self.X.append(torch.tensor(X_new, dtype=torch.float32, device=self.device))
-        self.Y.append(torch.tensor(Y_new, dtype=torch.float32, device=self.device))
+        self.X.append(torch.tensor(X_new, dtype=torch.float64, device=self.device))
+        self.Y.append(torch.tensor(Y_new, dtype=torch.float64, device=self.device))
 
     def train(self, training_iter=50, lr=0.1):
         train_x = torch.cat(self.X, dim=0)
@@ -235,7 +293,7 @@ class MultiGP:
             self.likelihoods.append(likelihood)
 
     def predict(self, Xnew: np.ndarray):
-        test_x = torch.tensor(Xnew, dtype=torch.float32, device=self.device)
+        test_x = torch.tensor(Xnew, dtype=torch.float64, device=self.device)
 
         mus, vars_ = [], []
         for model, likelihood in zip(self.models, self.likelihoods):
@@ -249,7 +307,6 @@ class MultiGP:
         mu = np.hstack(mus)  # (N, output_dim)
         var = np.hstack(vars_)  # (N, output_dim)
         return mu, var
-
 
 def create_gps(gp_settings, device, X_train, Y_train, training_iter, lr, variances=False):
     """Create and train GPs for all given GP settings and translate to CasADi, return GP and CasADi representations in dictionaries"""
