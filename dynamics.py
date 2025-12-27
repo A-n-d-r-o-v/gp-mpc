@@ -70,18 +70,18 @@ class DJIMatrice100(ODEModel):
     @dataclass 
     class MatriceState(ODEData):
         v1: float
-        v2: float # 1
-        v3: float # 2
-        roll: float # 3
+        v2: float
+        v3: float
+        roll: float
         pitch: float
-        yaw: float # 5
+        yaw: float
         p1: float
-        p2: float # 7
-        p3: float # 8
-        roll_ref: float # 9
+        p2: float
+        p3: float
+        roll_ref: float
         pitch_ref: float 
-        thrust: float # 11
-        roll_ref_dot: float # 12
+        thrust: float 
+        roll_ref_dot: float
         pitch_ref_dot: float
         thrust_dot: float
 
