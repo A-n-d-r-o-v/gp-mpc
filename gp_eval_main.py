@@ -6,7 +6,7 @@ import torch
 torch.set_default_dtype(torch.float64)
 
 from data import *
-from itertools import product
+#from itertools import product
 from typing import Iterable
 
 from dynamics import step, step_gp
@@ -30,13 +30,15 @@ def make_feature(state, inputs) -> np.ndarray:
     return np.hstack([state.as_numpy(), inputs.as_numpy()])
 
 
+'''
 def generate_discrete_inputs(roll_vals, pitch_vals, thrust_vals):
     """
     Cartesian product of 3 lists of candidate values.
     """
     return [Input(r, p, t) for r, p, t in product(roll_vals, pitch_vals, thrust_vals)]
+'''
 
-
+'''
 def most_uncertain_input(state: State, candidates: list[Input], gp: MultiGP):
     """
     Return the candidate input with the highest GP predictive uncertainty.
@@ -46,8 +48,9 @@ def most_uncertain_input(state: State, candidates: list[Input], gp: MultiGP):
     total_uncertainty = var.sum(axis=1)
     idx = int(np.argmax(total_uncertainty))
     return candidates[idx]
+'''
 
-
+""" 
 def walk_two_drones(gp: MultiGP, params: Params, dt: float, input_sequence: list[Input]):
     # initial states
     drone_true = State.zero()
@@ -77,8 +80,8 @@ def walk_two_drones(gp: MultiGP, params: Params, dt: float, input_sequence: list
         gp_positions.append([drone_gp.p1, drone_gp.p2, drone_gp.p3])
 
     return np.array(true_positions), np.array(gp_positions)
-
-# This is a walking drone sim locked to one axis 
+ """
+""" # This is a walking drone sim locked to one axis 
 def walk_two_drones_vert(diff_gps, params: Params, dt: float, input_sequence: list[Input]):
     # initial states
     drone_true = State.zero()
@@ -100,7 +103,7 @@ def walk_two_drones_vert(diff_gps, params: Params, dt: float, input_sequence: li
 
     return np.array(true_positions), np.array(gp_positions)
 
-
+ """
 def eval_GP(GP):
     assert GP.model is not None, "GP.model is None"
     assert GP.likelihood is not None, "GP.likelihood is None"

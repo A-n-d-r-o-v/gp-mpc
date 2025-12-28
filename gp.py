@@ -9,6 +9,40 @@ from gp_to_casadi import get_xdot
 
 
 @dataclass
+class GPSetting:
+    output_vars: frozenset[str] # Target GP var(s) to predict
+    input_vars: frozenset[str] # Input GP var(s)
+    periodic_vars: frozenset[str] = frozenset() # Optional subset of input_vars that are periodic 
+    name: str = None 
+
+class GPManager:
+    
+    gp_settings: List[GPSetting] = None
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def from_GPSettings(cls, settings: List[GPSetting]):
+        pass
+
+    def _validate_GPSettings(self):
+        pass
+    
+    @classmethod
+    def from_JSON(cls): # TODO: Or YAML?
+        raise NotImplementedError
+    
+    def create_GPs(self):
+        for settings in self.gp_settings:
+            pass
+
+
+class GPDataLoader:
+    pass
+
+'''
+@dataclass
 class GPSettings:
     """Settings for a single GP model"""
     name: str
@@ -43,7 +77,7 @@ class GPSettings:
     def get_output(self, Y: np.ndarray):
         """Get the relevant output"""
         return Y[:, self.output_index]
-
+'''
 
 def create_gp_settings(gps):
     """Create settings for all requested GPs and return them as a dictionary"""
@@ -107,6 +141,8 @@ def min_max_norm(data, set_min=None, set_max=None):
     
     return (data - min)/(max - min) if min != max else data
 """
+
+
 
 class GPBase(gpytorch.models.ExactGP):
      def __init__(self, train_x, train_y, likelihood):
