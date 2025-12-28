@@ -5,7 +5,7 @@ import casadi as cs
 from data import *
 from itertools import product
 
-from dynamics import step, step_gp, step_gp_casadi
+from ODEModel import step, step_gp, step_gp_casadi
 from gp import MultiGP, create_gp_settings, create_gps
 
 from data_gen_cfg import PARAMS, RANGES, CFG1_PERTURBATIONS, CFG2_PERTURBATIONS
