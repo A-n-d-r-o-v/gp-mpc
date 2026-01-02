@@ -1,45 +1,143 @@
 import torch
 import gpytorch
 import numpy as np
+
+from gpytorch.kernels import Kernel
+from gpytorch.likelihoods import Likelihood
+
 from math import pi
 from data import StateIdx, InputIdx
 from dataclasses import dataclass
-from typing import List
+from typing import List, TYPE_CHECKING, Optional
 from gp_to_casadi import get_xdot
+
+if TYPE_CHECKING:
+    from ODEModel import ODEModel # just need it for type hints
 
 
 @dataclass
 class GPSetting:
-    output_vars: frozenset[str] # Target GP var(s) to predict
-    input_vars: frozenset[str] # Input GP var(s)
-    periodic_vars: frozenset[str] = frozenset() # Optional subset of input_vars that are periodic 
-    name: str = None 
+
+    # Target GP var(s) to predict
+    output_vars: frozenset[str] 
+
+    # Input GP var(s)
+    input_vars: frozenset[str] 
+
+    # Optional subset of input_vars that are periodic 
+    periodic_vars: frozenset[str] = frozenset() 
+
+    # Use sparse GP
+    use_sparse: bool = False
+
+    name: Optional[str] = None 
+
+    kernel: Kernel = gpytorch.kernels.RBFKernel()
+    likelihood: Likelihood = gpytorch.likelihoods.GaussianLikelihood()
+
+    def __post_init__(self):
+        # Frozen sets are hashable and immutable
+        self.output_vars = frozenset(self.output_vars)
+        self.input_vars = frozenset(self.input_vars)
+        self.periodic_vars = frozenset(self.periodic_vars)
+
+    def validate(self):
+        # output_vars, input_vars should not be empty sets.
+        if not self.output_vars:
+            raise ValueError("output_vars cannot be empty")
+        if not self.input_vars:
+            raise ValueError("input_vars cannot be empty")
+        
+        # All periodic vars need to exist in input_vars
+        if not self.periodic_vars <= self.input_vars:
+            raise ValueError("All periodic_vars must exist in input_vars")
+        
+        # Sparse GP is only supported for SingleTask 
+        if self.use_sparse and len(self.output_vars) != 1:
+            raise NotImplementedError("SparseGP is not implemented for MultiTask GPs and requires exactly 1 output var")
 
 class GPManager:
-    
-    gp_settings: List[GPSetting] = None
+    """
+    Mostly for configuration: validating and parsing GP settings to instantiate GPs.
+    """
+
+    def __init__(self, gp_settings: List[GPSetting]):
+        if __class__._validate_GPSettings(gp_settings):
+            self.gp_settings = gp_settings
+
+    @classmethod
+    def _validate_GPSettings(self, settings: List[GPSetting]):
+        # Each var in output_vars may only exist in one instance - they must be unique.
+        # (NOTE: ^ I think this should be the case, intuitively)
+        # An output variable cannot also be an input variable and vice versa.
+        seen_in_vars, seen_out_vars = set(), set()
+        
+        for setting in settings:
+            setting.validate()
+            for in_var in setting.input_vars:
+                seen_in_vars.add(in_var)
+            for out_var in setting.output_vars:
+                if out_var in seen_out_vars:
+                    raise ValueError(f"output_var '{out_var}' appears in multiple GPSettings")
+                seen_out_vars.add(out_var)       
+
+        in_out_overlap = set.intersection(seen_in_vars, seen_out_vars)
+        if len(in_out_overlap) != 0:
+            raise ValueError(f"Overlapping input and output variables: {in_out_overlap}")
+        
+        return True
+
+    @classmethod    
+    def _build_gp(cls, setting: GPSetting):
+        """
+        Create a single GP model from one GPSetting.
+        """
+        if setting.use_sparse:
+            # must be single-output
+            return gpytorch.models.SparseSingleOutputGP(setting) # TODO: use our code
+        else:
+            if len(setting.output_vars) == 1:
+                return gpytorch.models.ExactSingleOutputGP(setting) # TODO
+            else:
+                return gpytorch.models.ExactMultiOutputGP(setting) # TODO
+
+    def to_ModelList(self):
+        models = []
+        for setting in self.settings:
+            models.append(__class__._build_gp(setting))
+
+        return gpytorch.models.ModelListGP(*models)
+
+    @classmethod
+    def to_BatchIndependentMultitaskGPModel(cls, settings: List[GPSetting]):
+        # each setting: 
+        #   - Exactly one output var
+        #   - Not sparse
+        # All settings must use the same input_vars 
+        num_tasks = len(settings)
+        raise NotImplementedError
+
+
+class GPData:
 
     def __init__(self):
+        self.trainX = []
+        self.trainY = []
+        
+        self.testX = []
+        self.testY = []
+
+    def generate_synthetic(self):
         pass
 
-    @classmethod
-    def from_GPSettings(cls, settings: List[GPSetting]):
+    def generate_from_trajectories(self, model: "ODEModel"):
         pass
+        # Needs to be generic! 
+        # like, automatically sample different input sequences and check distance to existing data.
 
-    def _validate_GPSettings(self):
-        pass
-    
-    @classmethod
-    def from_JSON(cls): # TODO: Or YAML?
-        raise NotImplementedError
-    
-    def create_GPs(self):
-        for settings in self.gp_settings:
-            pass
-
-
-class GPDataLoader:
-    pass
+    # Generate synthetic data
+    # Generate data using Model object ?? !!! Hell yeah!
+    # 
 
 '''
 @dataclass
@@ -282,7 +380,9 @@ class DifferentialGP:
         return mu, var
 
 
-
+"""
+TODO: Merge code from MultiGP branch.
+"""
 class MultiGP:
     def __init__(self, input_dim, output_dim, device="cpu"):
         self.input_dim = input_dim # Not really used

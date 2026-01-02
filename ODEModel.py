@@ -1,19 +1,17 @@
 import numpy as np
 
-from typing import List, Type, Optional
+from typing import List, Type, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 #from gp import min_max_norm
 #from math import pi 
-from data import ODEData
 
-from gp import GPSetting
-
-#import torch
+if TYPE_CHECKING: # Type hints only
+    from gp import GPSetting
+    from data import ODEData
 
 from abc import abstractmethod
 
 #Perturbation = Callable[[State, Input, Params, State], State]
-
 
 
 class ODEModel:
