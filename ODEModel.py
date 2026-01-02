@@ -9,17 +9,18 @@ if TYPE_CHECKING: # Type hints only
     from gp import GPSetting
     from data import ODEData
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 #Perturbation = Callable[[State, Input, Params, State], State]
 
 
-class ODEModel:
+class ODEModel(ABC):
     """
     Generic base class for an ODE model that is described both by a set of states, inputs, and parameters,
     and a set of ordinary differential equations that describe how these variables interact.
     This provides functionality for defining GP and ACADOS specifications in a centralized place
     for use in the rest of the pipeline.
+    Can not be instantiated; must be inherited from.
     """
 
     # An ODE model needs the following classes that all inherit from ODEData.
@@ -93,9 +94,13 @@ class ODEModel:
     
     @abstractmethod
     def gp_spec(self) -> List[GPSetting]:
-        raise NotImplementedError("Not callable from superclass; must be overridden")
+        pass
 
     @abstractmethod
+    def _analytical_dot(self, state, input, params) -> dict[str, float]:
+        pass
+
+
     def differentiate(
             self,
             state, 
@@ -116,7 +121,38 @@ class ODEModel:
         :return: The resulting State.
         :rtype: ODEData
         """
-        raise NotImplementedError("Not callable from superclass; must be overridden")
+                #return super().differentiate(state, input, params, diff_gps)
+       
+        analytical_dot = self._analytical_dot(state, input, params)
+
+        self.State._validate_field_dict(analytical_dot) # check that everything is there...
+
+        # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
+        if diff_gps:
+            for var_id, gp in diff_gps.items():
+                if not var_id in analytical_dot:
+                    raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
+                analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
+
+                # TODO: look over. Is this structure reasonable?
+                deps = self._classify_var_names(gp.input_vars)
+                gp_inputs = {name: getattr(state, name) for name in deps["state"]}
+                gp_inputs.update({name: getattr(input, name) for name in deps["input"]})
+
+                analytical_dot[var_id] = gp.predict(gp_inputs)
+
+
+        # ------------------ #
+        # -- Result state -- #
+        # ------------------ #
+        res_state = self.State.from_dict(analytical_dot)
+
+        # TODO: Apply optional perturbations
+
+        return res_state
+    
+    def step(self, state, input, params):
+        pass
     
     # @abstractmethod
     # def create_GPs(self, state, input, params):
@@ -125,29 +161,12 @@ class ODEModel:
     
     @abstractmethod
     def position(self, state):
-        raise NotImplementedError("Not callable from superclass; must be overridden")
+        pass
     
     @abstractmethod
     def orientation(self, state):
-        raise NotImplementedError("Not callable from superclass; must be overridden")
+        pass
     
     # TODO: add ACADOS stuff, like cost, ...
-    
-    #def position(self, state):
-    #    raise NotImplementedError("Not callable from superclass; must be overridden")
-
-    '''
-    def dynamics_analytical(
-            self,
-            state, 
-            input, 
-            params 
-            #diff_gps: List[Perturbation] = None # TODO !!
-        ) -> dict[str, float]:
-        raise NotImplementedError("Not callable from superclass; must be overridden")
-    '''
-
-
-# {State.V1: {"idx": 4, "gp": gp_obj_hash} }
 
 

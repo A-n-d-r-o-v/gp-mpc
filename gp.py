@@ -60,7 +60,6 @@ class GPManager:
     """
     Mostly for configuration: validating and parsing GP settings to instantiate GPs.
     """
-
     def __init__(self, gp_settings: List[GPSetting]):
         if __class__._validate_GPSettings(gp_settings):
             self.gp_settings = gp_settings
@@ -101,15 +100,31 @@ class GPManager:
             else:
                 return gpytorch.models.ExactMultiOutputGP(setting) # TODO
 
-    def to_ModelList(self):
+    def create_ModelList(self, settings: Optional[List[GPSetting]] = None):
+        """
+        Create a ModelList GP from settings.
+        
+        :param self:
+        :param settings: Optionally build from this list of GP settings instead of self.gp_settings.
+        :type settings: Optional[List[GPSetting]]
+        """
+        if settings is None:
+            settings = self.gp_settings
         models = []
-        for setting in self.settings:
+        for setting in settings:
             models.append(__class__._build_gp(setting))
 
         return gpytorch.models.ModelListGP(*models)
 
     @classmethod
-    def to_BatchIndependentMultitaskGPModel(cls, settings: List[GPSetting]):
+    def create_BatchIndependentMultitaskGPModel(cls, settings: Optional[List[GPSetting]] = None):
+        """
+        TODO: Could be interesting to look into.
+        
+        :param cls: 
+        :param settings: Optionally build from this list of GP settings instead of self.gp_settings.
+        :type settings: Optional[List[GPSetting]]
+        """
         # each setting: 
         #   - Exactly one output var
         #   - Not sparse

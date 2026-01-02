@@ -4,6 +4,10 @@ import numpy as np
 from dataclasses import dataclass
 from data import ODEData
 from ODEModel import ODEModel
+from typing import List
+import data_gen_cfg
+
+from gp import GPSetting
 
 
 class DJIMatrice100(ODEModel):
@@ -38,23 +42,98 @@ class DJIMatrice100(ODEModel):
         
     @dataclass(frozen=True)
     class MatriceParams(ODEData):
-        g: float
-        roll_gain: float
-        roll_tau: float
-        pitch_gain: float
-        pitch_tau: float
-        dragacc1: float
-        dragacc2: float
+        g: float            = 9.8066
+        roll_gain: float    = 1.101
+        roll_tau: float     = 0.253
+        pitch_gain: float   = 1.097
+        pitch_tau: float    = 0.267
+        dragacc1: float     = 0.01
+        dragacc2: float     = 0.01
 
     State = MatriceState
     Input = MatriceInput
     Params = MatriceParams
 
+    def __init__(self, 
+                 state: MatriceState, 
+                 input: MatriceInput, 
+                 params: MatriceParams = None, 
+                 name = None
+        ):
+        self.state = state
+        self.input = input
+
+        # Get from CFG unless specified in constructor 
+        if not params:
+            params = self.MatriceState.from_dict(data_gen_cfg.PARAMS)
+        self.params = params
+
+        super().__init__(name)
+
     # ===============================
 
+    def gp_spec_v1(self) -> List["GPSetting"]:
+        # NOTE: This is just dummy data
+        return [
+            GPSetting(
+                output_vars={"roll", "v2"}, input_vars={"thrust_dot", "pitch_gain", "roll"}, periodic_vars={"roll"}
+            ),
+            GPSetting(
+                output_vars={"pitch", "v1"}, input_vars={"thrust_dot", "pitch_gain", "roll"}, periodic_vars={"roll"}
+            ),
+            GPSetting(
+                output_vars={"v3"}, input_vars={"thrust_dot", "pitch_gain", "yaw"}, periodic_vars={"roll"}
+            )
+        ]
+    
+    def gp_spec(self) -> List["GPSetting"]:
+        return [
+            GPSetting(
+                output_vars = {"v1_dot"}, 
+                input_vars  = {"roll", "pitch", "yaw", "thrust", "v1"}, 
+                periodic_vars = None
+            ),
+            GPSetting(
+                output_vars = {"v2_dot"}, 
+                input_vars  = {"roll", "pitch", "yaw", "thrust", "v2"}, 
+                periodic_vars = None
+            ),
+            GPSetting(
+                output_vars = {"v3_dot"}, 
+                input_vars  = {"roll", "pitch", "thrust"}, 
+                periodic_vars = None
+            ),
+            GPSetting(
+                output_vars = {"roll_dot"}, 
+                input_vars  = {"roll", "pitch", "thrust"}, 
+                periodic_vars = None,
+                name="v2_dot"
+            ),
+        ]
+    
+    """
+    gp_settings = {}
 
-    def gp_spec(self):
-        return super().gp_spec()
+    if StateIdx.ROLL in gps:
+        gp_settings[StateIdx.ROLL] = GPSettings(
+            name="roll_dot",
+            state_indices=[StateIdx.ROLL],
+            control_indices=[StateIdx.ROLL_REF],
+            output_index=StateIdx.ROLL,
+            periodic_inputs=[False, False])
+
+    if StateIdx.PITCH in gps:
+        gp_settings[StateIdx.PITCH] = GPSettings(
+            name="pitch_dot",
+            state_indices=[StateIdx.PITCH],
+            control_indices=[StateIdx.PITCH_REF],
+            output_index=StateIdx.PITCH,
+            periodic_inputs=[False, False])
+    
+    return gp_settings
+
+
+    """
 
 
     def differentiate(self, state: "State", input: "Input", params: "Params", diff_gps = None) -> "State":
@@ -103,23 +182,23 @@ class DJIMatrice100(ODEModel):
         # -- Dynamics -- #
         # -------------- #
         analytical_dot = {
-            "v1": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1, # * v1 ? 
-            "v2": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2, # * v2 ?
-            "v3": -g + np.cos(pitch) * np.cos(roll) * thrust,
-            "roll": (roll_gain * roll_ref - roll) / roll_tau,
-            "pitch": (pitch_gain * pitch_ref - pitch) / pitch_tau,
-            "yaw": 0.0,
-            "p1": v1, "p2": v2, "p3": v3,
+            "v1_dot": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1, # * v1 ? 
+            "v2_dot": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2, # * v2 ?
+            "v3_dot": -g + np.cos(pitch) * np.cos(roll) * thrust,
+            "roll_dot": (roll_gain * roll_ref - roll) / roll_tau,
+            "pitch_dot": (pitch_gain * pitch_ref - pitch) / pitch_tau,
+            "yaw_dot": 0.0,
+            "p1_dot": v1, "p2_dot": v2, "p3_dot": v3,
 
             # Reference dynamics
-            "roll_ref": roll_ref_dot,
-            "pitch_ref": pitch_ref,
-            "thrust": thrust_dot,
+            "roll_ref_dot": roll_ref_dot,
+            "pitch_ref_dot": pitch_ref,
+            "thrust_dot": thrust_dot,
 
             # Second derivatives = input
-            "roll_ref_dot": roll_ref_ddot,
-            "pitch_ref_dot": pitch_ref_ddot,
-            "thrust_dot": thrust_ddot
+            "roll_ref_ddot": roll_ref_ddot,
+            "pitch_ref_ddot": pitch_ref_ddot,
+            "thrust_ddot": thrust_ddot
         }
 
         self.State._validate_field_dict(analytical_dot) # check that everything is there...
