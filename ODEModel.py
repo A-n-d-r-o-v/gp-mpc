@@ -26,7 +26,7 @@ class ODEModel(ABC):
     # An ODE model needs the following classes that all inherit from ODEData.
     State: Type[ODEData] = None
     Input: Type[ODEData] = None
-    Params: Type[ODEData] = None
+    Params: Type[ODEData] = None # This contains constants.
 
     def __init__(self, name: str = None):
         self.name = name
@@ -97,9 +97,97 @@ class ODEModel(ABC):
         pass
 
     @abstractmethod
+    def _gps_to_model(self) -> Optional[{str}]:
+        """
+        Specify which set of GPs to use.
+        TODO: Should maybe make use of the output fields instead of the GPSetting names. 
+        
+        :param self: Description
+        :return: A set of strings containing the names of the GPSettings to use.
+        :rtype: Any | None
+        """
+        return None
+
+    def _filter_gp_spec(self, gp_spec: List["GPSetting"], names: {str}) -> List["GPSetting"]:
+        """
+        Docstring for filter_gp_spec
+        TODO: Should maybe make use of the output fields instead of the GPSetting names. 
+        
+        :param self: Description
+        :param gp_spec: The list of GP settings
+        :type gp_spec: List["GPSetting"]
+        :param names: Description
+        :type names: List[str]
+        :return: Description
+        :rtype: List[GPSetting]
+        """
+        if not names:
+            raise ValueError("Names cannot be an empty set.")
+        
+        seen_names = set()
+        specs = []
+        for spec in gp_spec:
+            # Check for duplicates
+            if spec.name in seen_names:
+                raise ValueError(f"Duplicate GPSetting name: {spec.name}. Ensure that all GPSetting names are unique.")
+            # Find matching specs
+            if spec.name in names:
+                specs.append(spec)
+            seen_names.add(spec.names)
+
+        if not specs:
+            raise ValueError("No matching names found ")
+        
+        return specs
+
+    @abstractmethod
+    def _LHS_data_ranges(self) -> dict[str, tuple[float, float]]:
+        """
+        Specify the ranges of values to generate with Latin Hypercube Sampling (LHS).
+        This should return a dictionary mapping {"var": (min, max), ...} and must contain
+        ranges for all fields in State and Input.
+
+        :param self: Description
+        :return: Description
+        :rtype: dict[str, tuple[float, float]]
+        """
+        raise NotImplementedError
+
+    def get_LHS_data_ranges_safe(self) -> dict[str, tuple[float, float]]:
+        """
+        Get the LHS_data_ranges dict and validate that the dict structure is correctly implemented.
+        Return the dict of ranges if no errors are present.
+        
+        TODO:   Instead of requiring all fields to be there, implement the option to
+                default missing fields to (0,0)
+        
+        :param self: 
+        :return: The ranges, if no errors are present.
+        :rtype: dict[str, tuple[float, float]]
+        """
+        ranges = self._LHS_data_ranges()
+        if ranges is None:
+            raise ValueError("Ranges is None. Ensure that it is implemented.")
+        
+        # Check that all state and input fields are represented by the dict 
+        self.State.validate_covered_by_dict(ranges, allow_missing=False, allow_extra=True)
+        self.Input.validate_covered_by_dict(ranges, allow_missing=False, allow_extra=True)
+
+        # Validate range tuple
+        for k, v in ranges.items():
+            if (
+                not isinstance(v, tuple)
+                or len(v) != 2
+                or not all(isinstance(x, (int, float)) for x in v)
+                or v[0] >= v[1]
+            ):
+                raise ValueError(f"Invalid range for '{k}': {v}")
+
+        return ranges
+
+    @abstractmethod
     def _analytical_dot(self, state, input, params) -> dict[str, float]:
         pass
-
 
     def differentiate(
             self,
@@ -111,6 +199,11 @@ class ODEModel(ABC):
         ) -> ODEData:
         """
         Docstring for differentiate TODO
+
+        NOTE: We will want an option to *add* the GP to the ODE rather than replace it.
+                Maybe bake this into the GP object: is it a residual or "absolute" from-scratch GP?
+                Set this when we generate data.
+                Data: Is Residual? --> GP --> Here
         
         :param self: 
         :param state: The state.
@@ -127,20 +220,29 @@ class ODEModel(ABC):
 
         self.State._validate_field_dict(analytical_dot) # check that everything is there...
 
+        # TODO: Maybe all this stuff should be moved to GPManager! Or maybe not..
+        # We don't build GPs here...
+        # But maybe we can still filter which GPs to predict with.
+        gp_spec = self.gp_spec()
+        if self.gps_to_model:
+            gp_spec = self._filter_gp_spec(gp_spec, self._gps_to_model())
+
         # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
         if diff_gps:
             for var_id, gp in diff_gps.items():
                 if not var_id in analytical_dot:
                     raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
                 analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
+                # --> {"v1_dot": prediction} (single gp)
+                # --> {"v2_dot": prediction, "pitch": prediction} (multi gp)
 
-                # TODO: look over. Is this structure reasonable?
+
+                # TODO: look over. reasonable?
                 deps = self._classify_var_names(gp.input_vars)
                 gp_inputs = {name: getattr(state, name) for name in deps["state"]}
                 gp_inputs.update({name: getattr(input, name) for name in deps["input"]})
 
-                analytical_dot[var_id] = gp.predict(gp_inputs)
-
+                analytical_dot[var_id] = gp.predict(gp_inputs) # or +=
 
         # ------------------ #
         # -- Result state -- #
@@ -151,21 +253,17 @@ class ODEModel(ABC):
 
         return res_state
     
-    def step(self, state, input, params):
-        pass
-    
-    # @abstractmethod
-    # def create_GPs(self, state, input, params):
-    #     # return dict of 
-    #     pass
+    def step(self, state, input, params, dt=1): # TODO: optionally add GPs
+        step_state = self.differentiate(state, input, params)
+        return state.sum(step_state*dt)
     
     @abstractmethod
     def position(self, state):
-        pass
+        return None
     
     @abstractmethod
     def orientation(self, state):
-        pass
+        return None
     
     # TODO: add ACADOS stuff, like cost, ...
 

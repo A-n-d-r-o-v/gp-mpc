@@ -51,6 +51,11 @@ class ODEData:
     def distance_to(self, other) -> float:
         """Euclidean distance to another instance of same type."""
         return np.linalg.norm(self.as_numpy() - other.as_numpy())
+    
+    def sum(self, other):
+        """Return a new instance representing self + other."""
+        diff_values = self.as_numpy() + other.as_numpy()
+        return self.__class__.from_numpy(diff_values)
 
     def difference(self, other):
         """Return a new instance representing self - other."""
@@ -62,7 +67,7 @@ class ODEData:
         return self.difference(other).as_dict()
     
     @classmethod
-    def _validate_field_dict(cls, d: dict, raise_missing_field_error = True) -> bool:
+    def validate_covered_by_dict(cls, d: dict, allow_missing: bool = False, allow_extra: bool = True) -> bool:
         """
         Check that a dictionary d that maps {"var_name" -> value} contains
         all the corresponding fields defined in the dataclass.
@@ -71,7 +76,7 @@ class ODEData:
         :param cls:
         :param d: The dictionary mapping {"state_var_name" -> value}.
         :type d: dict
-        :param raise_missing_field_error: Raise an error if a field is missing from the dict.
+        :param allow_extra: Do not raise an error if the dict contains a key not in the dataclass.
         :return: Whether the set of keys in the provided dict fully matches the set of dataclass fields.
         :rtype: bool
         """
@@ -81,15 +86,13 @@ class ODEData:
         missing = fields_set - keys_set
         extra = keys_set - fields_set
 
-        if missing:
-            if raise_missing_field_error:
-                raise ValueError(f"Missing dict key(s) for: {missing}")
-            else: 
-                print(f"Warning: Missing dict key(s) for: {missing}")
-        if extra:
+        if missing and not allow_missing:
+            raise ValueError(f"Missing required fields for {cls.__name__}: {missing}")
+
+        if extra and not allow_extra:
             raise ValueError(f"Unknown dict key(s): {extra}")
         
-        return not missing and not extra
+        return True
 
     @classmethod
     def from_dict(cls: type["ODEData"], d: dict[str, float], fill_missing: bool = False) -> "ODEData":
@@ -97,7 +100,7 @@ class ODEData:
         Convert a dictionary to an instance of this dataclass.
         """
         if not fill_missing:
-            cls._validate_state_dict(d, raise_missing_field_error=True)
+            cls.validate_covered_by_dict(d, allow_missing=False, allow_extra=True)
         else:
             # Fill missing keys with 0
             fields_set = set(cls.__dataclass_fields__.keys())
@@ -110,7 +113,6 @@ class ODEData:
                 raise ValueError(f"Unknown dict key(s): {extra_keys}")
 
         return cls(**d)
-
 
     @classmethod
     def zero(cls: Type[T]) -> T: # Use the type of whatever inherits this class

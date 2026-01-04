@@ -42,13 +42,13 @@ class DJIMatrice100(ODEModel):
         
     @dataclass(frozen=True)
     class MatriceParams(ODEData):
-        g: float            = 9.8066
-        roll_gain: float    = 1.101
-        roll_tau: float     = 0.253
-        pitch_gain: float   = 1.097
-        pitch_tau: float    = 0.267
-        dragacc1: float     = 0.01
-        dragacc2: float     = 0.01
+        g: float
+        roll_gain: float
+        roll_tau: float
+        pitch_gain: float
+        pitch_tau: float
+        dragacc1: float
+        dragacc2: float
 
     State = MatriceState
     Input = MatriceInput
@@ -57,7 +57,7 @@ class DJIMatrice100(ODEModel):
     def __init__(self, 
                  state: MatriceState, 
                  input: MatriceInput, 
-                 params: MatriceParams = None, 
+                 params: MatriceParams = None, # optionally get from cfg
                  name = None
         ):
         self.state = state
@@ -72,17 +72,32 @@ class DJIMatrice100(ODEModel):
 
     # ===============================
 
-    def gp_spec_v1(self) -> List["GPSetting"]:
-        # NOTE: This is just dummy data
+    def gp_spec_v2(self) -> List["GPSetting"]:
+        """
+        GP spec based on distance correlation matrix data.
+        
+        :param self: Description
+        :return: Description
+        :rtype: List[GPSetting]
+        """
         return [
             GPSetting(
-                output_vars={"roll", "v2"}, input_vars={"thrust_dot", "pitch_gain", "roll"}, periodic_vars={"roll"}
+                output_vars = {"v1_dot, roll_dot"},
+                input_vars  = {"roll", "roll_ref", "pitch", "yaw", "thrust", "v1"}, 
+                periodic_vars = None,
+                name = "v1_roll",
             ),
             GPSetting(
-                output_vars={"pitch", "v1"}, input_vars={"thrust_dot", "pitch_gain", "roll"}, periodic_vars={"roll"}
+                output_vars = {"v2_dot", "pitch_dot"}, 
+                input_vars  = {"roll", "pitch", "pitch_ref", "yaw", "thrust", "v2"}, 
+                periodic_vars = None,
+                name = "v2_pitch"
             ),
             GPSetting(
-                output_vars={"v3"}, input_vars={"thrust_dot", "pitch_gain", "yaw"}, periodic_vars={"roll"}
+                output_vars = {"v3_dot"}, 
+                input_vars  = {"roll", "pitch", "thrust"}, 
+                periodic_vars = None,
+                name = "v3"
             )
         ]
     
@@ -91,72 +106,86 @@ class DJIMatrice100(ODEModel):
             GPSetting(
                 output_vars = {"v1_dot"}, 
                 input_vars  = {"roll", "pitch", "yaw", "thrust", "v1"}, 
-                periodic_vars = None
+                periodic_vars = None,
+                name = "v1"
             ),
             GPSetting(
                 output_vars = {"v2_dot"}, 
                 input_vars  = {"roll", "pitch", "yaw", "thrust", "v2"}, 
-                periodic_vars = None
+                periodic_vars = None,
+                name = "v2"
             ),
             GPSetting(
                 output_vars = {"v3_dot"}, 
                 input_vars  = {"roll", "pitch", "thrust"}, 
-                periodic_vars = None
+                periodic_vars = None,
+                name = "v3"
             ),
             GPSetting(
                 output_vars = {"roll_dot"}, 
-                input_vars  = {"roll", "pitch", "thrust"}, 
+                input_vars  = {"roll", "roll_ref"}, 
                 periodic_vars = None,
-                name="v2_dot"
+                name = "roll"
             ),
+            GPSetting(
+                output_vars = {"pitch_dot"}, 
+                input_vars  = {"pitch", "pitch_ref"}, 
+                periodic_vars = None,
+                name = "pitch"
+            )
         ]
     
-    """
-    gp_settings = {}
-
-    if StateIdx.ROLL in gps:
-        gp_settings[StateIdx.ROLL] = GPSettings(
-            name="roll_dot",
-            state_indices=[StateIdx.ROLL],
-            control_indices=[StateIdx.ROLL_REF],
-            output_index=StateIdx.ROLL,
-            periodic_inputs=[False, False])
-
-    if StateIdx.PITCH in gps:
-        gp_settings[StateIdx.PITCH] = GPSettings(
-            name="pitch_dot",
-            state_indices=[StateIdx.PITCH],
-            control_indices=[StateIdx.PITCH_REF],
-            output_index=StateIdx.PITCH,
-            periodic_inputs=[False, False])
+    def _gps_to_model(self):
+        return {"v1", "v2", "v3"}
     
-    return gp_settings
+    def state_space_data_ranges(self):
+        return {
+            # VELOCITY
+            "v1":               (-5, 5),
+            "v2":               (-5, 5),
+            "v3":               (-5, 5),
 
+            # ORIENTATION
+            "roll":             (-3.1415, 3.1415),
+            "pitch":             (-3.1415, 3.1415),
+            "yaw":               (0, 0), # unused in the model 
+            #"pitch":            (0, 0),
 
-    """
+            # POSITION, the position of the drone has no effect on the derivatives
+            "p1":               (0, 0),
+            "p2":               (0, 0),
+            "p3":               (0, 0),
 
+            # TARGET/REFERENCE STATES? 
+            "roll_ref":         (-10, 10),
+            "pitch_ref":        (-10, 10),
+            "thrust":           (-5, 150),
+            # "thrust":           (2 ,2),
 
-    def differentiate(self, state: "State", input: "Input", params: "Params", diff_gps = None) -> "State":
-        #return super().differentiate(state, input, params, diff_gps)
-       
+            # FIRST DERIVATIVES 
+            "roll_ref_dot":     (-2, 2),
+            "pitch_ref_dot":    (-2, 2),
+            "thrust_dot":       (-2, 2),
+
+            # INPUT (SECOND DERIVATIVES)
+            "roll_ref_ddot":    (0, 0),
+            "pitch_ref_ddot":   (0, 0),
+            "thrust_ddot":      (-3*self.params.g, 3*self.params.g),
+        }
+
+    def _analytical_dot(self, state: "State", input: "Input", params: "Params"):
         # ----------- #
         # -- State -- #
         # ----------- #
-        # Velocity
+        # Position, velocity, orientation
+        p1, p2, p3 = state.p1, state.p2, state.p3 
         v1, v2, v3 = state.v1, state.v2, state.v3 
-
-        # Orientation
         roll, pitch, yaw = state.roll, state.pitch, state.yaw 
 
-        # Position
-        p1, p2, p3 = state.p1, state.p2, state.p3 
-
-        # Ref
+        # Ref, ref dot
         roll_ref, pitch_ref = state.roll_ref, state.pitch_ref
-
-        # Ref dot
         roll_ref_dot, pitch_ref_dot = state.roll_ref_dot, state.pitch_ref_dot
-        
+
         # Thrust
         thrust, thrust_dot = state.thrust, state.thrust_dot 
 
@@ -181,7 +210,7 @@ class DJIMatrice100(ODEModel):
         # -------------- #
         # -- Dynamics -- #
         # -------------- #
-        analytical_dot = {
+        return {
             "v1_dot": (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1, # * v1 ? 
             "v2_dot": (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2, # * v2 ?
             "v3_dot": -g + np.cos(pitch) * np.cos(roll) * thrust,
@@ -192,7 +221,7 @@ class DJIMatrice100(ODEModel):
 
             # Reference dynamics
             "roll_ref_dot": roll_ref_dot,
-            "pitch_ref_dot": pitch_ref,
+            "pitch_ref_dot": pitch_ref_dot,
             "thrust_dot": thrust_dot,
 
             # Second derivatives = input
@@ -200,30 +229,6 @@ class DJIMatrice100(ODEModel):
             "pitch_ref_ddot": pitch_ref_ddot,
             "thrust_ddot": thrust_ddot
         }
-
-        self.State._validate_field_dict(analytical_dot) # check that everything is there...
-
-        # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
-        if diff_gps:
-            for var_id in diff_gps:
-                if not var_id in analytical_dot:
-                    raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
-                analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
-
-        # ------------------ #
-        # -- Result state -- #
-        # ------------------ #
-        res_state = self.State.from_dict(analytical_dot)
-
-        # TODO: Apply optional perturbations
-
-        return res_state
-
-        
-
-    #def __init__(self, name: str = None):
-    #    super().__init__(name=name)
-
 
 
 '''
@@ -235,53 +240,8 @@ def differentiate(state: State,
     """
     Compute time-derivative of the state vector.
     """
-    # unpack state
-    v1, v2, v3 = state.v1, state.v2, state.v3
-    roll, pitch, yaw = state.roll, state.pitch, state.yaw
-    p1, p2, p3 = state.p1, state.p2, state.p3
-    roll_ref, pitch_ref, thrust = state.roll_ref, state.pitch_ref, state.thrust
-    roll_ref_dot, pitch_ref_dot, thrust_dot = (
-        state.roll_ref_dot, state.pitch_ref_dot, state.thrust_dot
-    )
-
-    # unpack input
-    roll_ref_ddot = input.roll_ref_ddot
-    pitch_ref_ddot = input.pitch_ref_ddot
-    thrust_ddot = input.thrust_ddot
-
-    # unpack params
-    g = params.g
-    roll_gain = params.roll_gain
-    roll_tau = params.roll_tau
-    pitch_gain = params.pitch_gain
-    pitch_tau = params.pitch_tau
-    dragacc1 = params.dragacc1
-    dragacc2 = params.dragacc2
-
-    # translational dynamics
-    v1_dot = (np.cos(roll) * np.cos(yaw) * np.sin(pitch) + np.sin(roll) * np.sin(yaw)) * thrust - dragacc1 * v1
-    v2_dot = (np.cos(roll) * np.sin(pitch) * np.sin(yaw) - np.cos(yaw) * np.sin(roll)) * thrust - dragacc2 * v2
-    v3_dot = -g + np.cos(pitch) * np.cos(roll) * thrust
-    #print(f"v3_act: {v3_dot}, pitch: {pitch}, roll: {roll},  thrust: {thrust}")
-
-    # rotational dynamics
-    roll_dot = (roll_gain * roll_ref - roll) / roll_tau
-    pitch_dot = (pitch_gain * pitch_ref - pitch) / pitch_tau
-    # print(f"roll_dot_roll: {roll_dot}, roll: {roll},  roll_ref: {roll_ref}")
-    yaw_dot = 0.0
-
-    # position dynamics
-    p1_dot, p2_dot, p3_dot = v1, v2, v3
-
-    # reference dynamics
-    roll_ref_dot_val = roll_ref_dot
-    pitch_ref_dot_val = pitch_ref_dot
-    thrust_dot_val = thrust_dot
-
-    # second derivatives = input
-    roll_ref_dot_dot = roll_ref_ddot
-    pitch_ref_dot_dot = pitch_ref_ddot
-    thrust_dot_dot = thrust_ddot
+    
+    # [unpack...]
 
     res_state = State(
         v1_dot, v2_dot, v3_dot,

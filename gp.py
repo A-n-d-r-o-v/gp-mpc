@@ -26,11 +26,11 @@ class GPSetting:
 
     # Optional subset of input_vars that are periodic 
     periodic_vars: frozenset[str] = frozenset() 
+    
+    name: str 
 
     # Use sparse GP
     use_sparse: bool = False
-
-    name: Optional[str] = None 
 
     kernel: Kernel = gpytorch.kernels.RBFKernel()
     likelihood: Likelihood = gpytorch.likelihoods.GaussianLikelihood()
@@ -67,7 +67,7 @@ class GPManager:
     @classmethod
     def _validate_GPSettings(self, settings: List[GPSetting]):
         # Each var in output_vars may only exist in one instance - they must be unique.
-        # (NOTE: ^ I think this should be the case, intuitively)
+        # (NOTE: ^ I think this should hold true , intuitively)
         # An output variable cannot also be an input variable and vice versa.
         seen_in_vars, seen_out_vars = set(), set()
         
@@ -142,10 +142,27 @@ class GPData:
         self.testX = []
         self.testY = []
 
-    def generate_synthetic(self):
+    
+    def generate_synthetic_lhs(self, model: "ODEModel"):
+        """
+        Generate training data by sampling the state space using Latin Hypercube Sampling (LHS).
+        For each LHS sample, a sampled input is applied to the state S, to land in state S'.
+        The resulting training sample is the state difference S - S'.
+        
+        :param self: Description
+        :param model: The ODE model to sample from.
+        :type model: ODEModel
+        """
         pass
 
     def generate_from_trajectories(self, model: "ODEModel"):
+        """
+        Generate training data by sampling different control (input) sequences.
+        
+        :param self: Description
+        :param model: The ODE model to sample from.
+        :type model: ODEModel
+        """
         pass
         # Needs to be generic! 
         # like, automatically sample different input sequences and check distance to existing data.

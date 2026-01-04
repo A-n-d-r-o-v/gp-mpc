@@ -9,7 +9,7 @@ from data import *
 #from itertools import product
 from typing import Iterable
 
-from dynamics import step, step_gp
+from ODEModel import step, step_gp
 from gp import MultiGP, DifferentialGP
 
 import gpytorch
