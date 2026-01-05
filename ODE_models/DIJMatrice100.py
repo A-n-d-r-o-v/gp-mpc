@@ -136,7 +136,7 @@ class DJIMatrice100(ODEModel):
     def _gps_to_model(self):
         return {"v1", "v2", "v3"}
     
-    def _LHS_data_ranges(self):
+    def _LHS_data_ranges(self, params: "Params"):
         return {
             # VELOCITY
             "v1":               (-5, 5),
@@ -168,7 +168,7 @@ class DJIMatrice100(ODEModel):
             # INPUT (SECOND DERIVATIVES)
             "roll_ref_ddot":    (0, 0),
             "pitch_ref_ddot":   (0, 0),
-            "thrust_ddot":      (-3*self.params.g, 3*self.params.g),
+            "thrust_ddot":      (-3*params.g, 3*params.g),
         }
 
     def _analytical_dot(self, state: "State", input: "Input", params: "Params"):

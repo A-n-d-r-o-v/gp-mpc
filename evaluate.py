@@ -13,6 +13,8 @@ def evaluate_gp():
 def main():
     model = DJIMatrice100()
 
+    print(model.get_LHS_data_ranges_safe(model.default_params))
+
     print("This code runs")
     
 

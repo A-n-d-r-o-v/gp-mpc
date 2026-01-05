@@ -142,7 +142,7 @@ class ODEModel(ABC):
         return specs
 
     @abstractmethod
-    def _LHS_data_ranges(self) -> dict[str, tuple[float, float]]:
+    def _LHS_data_ranges(self, params) -> dict[str, tuple[float, float]]:
         """
         Specify the ranges of values to generate with Latin Hypercube Sampling (LHS).
         This should return a dictionary mapping {"var": (min, max), ...} and must contain
@@ -154,7 +154,7 @@ class ODEModel(ABC):
         """
         raise NotImplementedError
 
-    def get_LHS_data_ranges_safe(self) -> dict[str, tuple[float, float]]:
+    def get_LHS_data_ranges_safe(self, params) -> dict[str, tuple[float, float]]:
         """
         Get the LHS_data_ranges dict and validate that the dict structure is correctly implemented.
         Return the dict of ranges if no errors are present.
@@ -166,7 +166,7 @@ class ODEModel(ABC):
         :return: The ranges, if no errors are present.
         :rtype: dict[str, tuple[float, float]]
         """
-        ranges = self._LHS_data_ranges()
+        ranges = self._LHS_data_ranges(params)
         if ranges is None:
             raise ValueError("Ranges is None. Ensure that it is implemented.")
         
@@ -180,7 +180,7 @@ class ODEModel(ABC):
                 not isinstance(v, tuple)
                 or len(v) != 2
                 or not all(isinstance(x, (int, float)) for x in v)
-                or v[0] >= v[1]
+                or v[0] > v[1]
             ):
                 raise ValueError(f"Invalid range for '{k}': {v}")
 
@@ -267,7 +267,7 @@ class ODEModel(ABC):
     def orientation(self, state):
         return None
     '''
-    
+
     # TODO: add ACADOS stuff, like cost, ...
 
 
