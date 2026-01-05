@@ -237,7 +237,6 @@ class ODEModel(ABC):
                 # --> {"v1_dot": prediction} (single gp)
                 # --> {"v2_dot": prediction, "pitch": prediction} (multi gp)
 
-
                 # TODO: look over. reasonable?
                 deps = self._classify_var_names(gp.input_vars)
                 gp_inputs = {name: getattr(state, name) for name in deps["state"]}

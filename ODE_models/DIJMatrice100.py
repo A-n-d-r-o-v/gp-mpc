@@ -134,7 +134,7 @@ class DJIMatrice100(ODEModel):
         ]
     
     def _gps_to_model(self):
-        return {"v1", "v2", "v3"}
+        pass #return {"v1", "v2", "v3"}
     
     def _LHS_data_ranges(self, params: "Params"):
         return {

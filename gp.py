@@ -4,6 +4,7 @@ import numpy as np
 
 from gpytorch.kernels import Kernel
 from gpytorch.likelihoods import Likelihood
+from gpytorch.models.model_list import IndependentModelList
 
 from math import pi
 #from data import StateIdx, InputIdx
@@ -39,7 +40,11 @@ class GPSetting:
         # Frozen sets are hashable and immutable
         self.output_vars = frozenset(self.output_vars)
         self.input_vars = frozenset(self.input_vars)
-        self.periodic_vars = frozenset(self.periodic_vars)
+
+        if self.periodic_vars is not None:
+            self.periodic_vars = frozenset(self.periodic_vars)
+        else:
+            self.periodic_vars = frozenset()
 
     def validate(self):
         # output_vars, input_vars should not be empty sets.
@@ -49,6 +54,7 @@ class GPSetting:
             raise ValueError("input_vars cannot be empty")
         
         # All periodic vars need to exist in input_vars
+        
         if not self.periodic_vars <= self.input_vars:
             raise ValueError("All periodic_vars must exist in input_vars")
         
@@ -60,7 +66,9 @@ class GPManager:
     """
     Mostly for configuration: validating and parsing GP settings to instantiate GPs.
     """
-    def __init__(self, gp_settings: List[GPSetting]):
+    def __init__(self, name: str, gp_settings: List[GPSetting]):
+        self.name = name
+
         if __class__._validate_GPSettings(gp_settings):
             self.gp_settings = gp_settings
 
@@ -93,14 +101,14 @@ class GPManager:
         """
         if setting.use_sparse:
             # must be single-output
-            return gpytorch.models.SparseSingleOutputGP(setting) # TODO: use our code
+            return GPBase(None, None, setting.likelihood) #gpytorch.models.SparseSingleOutputGP(setting) # TODO: use our code
         else:
             if len(setting.output_vars) == 1:
-                return gpytorch.models.ExactSingleOutputGP(setting) # TODO
+                return GPBase(None, None, setting.likelihood)#gpytorch.models.ExactSingleOutputGP(setting) # TODO
             else:
-                return gpytorch.models.ExactMultiOutputGP(setting) # TODO
+                return GPBase(None, None, setting.likelihood) # gpytorch.models.ExactMultiOutputGP(setting) # TODO
 
-    def create_ModelList(self, settings: Optional[List[GPSetting]] = None):
+    def create_ModelList(self, settings: Optional[List[GPSetting]] = None) -> IndependentModelList:
         """
         Create a ModelList GP from settings.
         
@@ -114,7 +122,7 @@ class GPManager:
         for setting in settings:
             models.append(__class__._build_gp(setting))
 
-        return gpytorch.models.ModelListGP(*models)
+        return IndependentModelList(*models)
 
     @classmethod
     def create_BatchIndependentMultitaskGPModel(cls, settings: Optional[List[GPSetting]] = None):
@@ -136,11 +144,11 @@ class GPManager:
 class GPData:
 
     def __init__(self):
-        self.trainX = []
-        self.trainY = []
-        
-        self.testX = []
-        self.testY = []
+        self.trainX: List[torch.Tensor] = []
+        self.trainY: List[torch.Tensor] = []
+
+        self.testX: List[torch.Tensor] = []
+        self.testY: List[torch.Tensor] = []
 
     
     def generate_synthetic_lhs(self, model: "ODEModel"):
