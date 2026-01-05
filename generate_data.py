@@ -14,16 +14,15 @@ from pyDOE3 import lhs
 
 from data import State, Input
 from data_gen_cfg import PARAMS, RANGES, CFG1_PERTURBATIONS, CFG2_PERTURBATIONS
-from dynamics import step
+from ODEModel import step
 
-from dynamics import step, differentiate_features
+from ODEModel import step, differentiate_features
 # ==========================
 # Parameters and initialization
 # ==========================
 
 
 # function to compute rotation matrix from roll/pitch/yaw
-# TODO move to dynamics.py ?
 def body_axes(roll, pitch, yaw):
     cr, sr = np.cos(roll), np.sin(roll)
     cp, sp = np.cos(pitch), np.sin(pitch)

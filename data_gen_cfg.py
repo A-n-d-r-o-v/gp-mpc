@@ -1,17 +1,15 @@
-from data import State, Params
-
-
+#from data import State, Params
 
 # ============== #
 #     PARAMS     #
 # ============== #
 
-PARAMS = Params(
-    g=9.8066,
-    roll_gain=1.101, roll_tau=0.253,
-    pitch_gain=1.097, pitch_tau=0.267,
-    dragacc1=0.01, dragacc2=0.01
-)
+PARAMS = {
+    "g": 9.8066,
+    "roll_gain": 1.101, "roll_tau": 0.253,
+    "pitch_gain": 1.097, "pitch_tau": 0.267,
+    "dragacc1": 0.01, "dragacc2": 0.01
+}
 
 
 # ============== #
@@ -23,7 +21,7 @@ PARAMS = Params(
 # ===================== #
 #     PERTURBATIONS     #
 # ===================== #
-
+'''
 quad_vel_drag = lambda s, i, p, sd: State(
         -0.1*s.v1**2, -0.1*s.v2**2, -0.1*s.v3**2,
         0,0,0,
@@ -66,4 +64,4 @@ poly_pitch_input = lambda s, i, p, sd: State(
 
 CFG1_PERTURBATIONS = [weaker_thrust, pitch_sensor_bias, cubic_roll_input, poly_pitch_input]
 CFG2_PERTURBATIONS = [quad_vel_drag, weaker_thrust, pitch_sensor_bias]
-
+'''

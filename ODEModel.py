@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import numpy as np
 
 from typing import List, Type, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 #from gp import min_max_norm
 #from math import pi 
-
 if TYPE_CHECKING: # Type hints only
     from gp import GPSetting
     from data import ODEData
@@ -24,9 +25,9 @@ class ODEModel(ABC):
     """
 
     # An ODE model needs the following classes that all inherit from ODEData.
-    State: Type[ODEData] = None
-    Input: Type[ODEData] = None
-    Params: Type[ODEData] = None # This contains constants.
+    State: Type[ODEData]    | None = None
+    Input: Type[ODEData]    | None = None
+    Params: Type[ODEData]   | None = None # This contains constants.
 
     def __init__(self, name: str = None):
         self.name = name
@@ -99,7 +100,7 @@ class ODEModel(ABC):
     @abstractmethod
     def _gps_to_model(self) -> Optional[{str}]:
         """
-        Specify which set of GPs to use.
+        Specify the set of GPs to use for prediction.
         TODO: Should maybe make use of the output fields instead of the GPSetting names. 
         
         :param self: Description
@@ -257,6 +258,7 @@ class ODEModel(ABC):
         step_state = self.differentiate(state, input, params)
         return state.sum(step_state*dt)
     
+    '''
     @abstractmethod
     def position(self, state):
         return None
@@ -264,6 +266,7 @@ class ODEModel(ABC):
     @abstractmethod
     def orientation(self, state):
         return None
+    '''
     
     # TODO: add ACADOS stuff, like cost, ...
 

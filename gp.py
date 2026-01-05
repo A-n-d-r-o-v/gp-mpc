@@ -6,7 +6,7 @@ from gpytorch.kernels import Kernel
 from gpytorch.likelihoods import Likelihood
 
 from math import pi
-from data import StateIdx, InputIdx
+#from data import StateIdx, InputIdx
 from dataclasses import dataclass
 from typing import List, TYPE_CHECKING, Optional
 from gp_to_casadi import get_xdot
@@ -23,17 +23,17 @@ class GPSetting:
 
     # Input GP var(s)
     input_vars: frozenset[str] 
-
-    # Optional subset of input_vars that are periodic 
-    periodic_vars: frozenset[str] = frozenset() 
     
     name: str 
 
-    # Use sparse GP
-    use_sparse: bool = False
-
     kernel: Kernel = gpytorch.kernels.RBFKernel()
     likelihood: Likelihood = gpytorch.likelihoods.GaussianLikelihood()
+
+    # Optional subset of input_vars that are periodic 
+    periodic_vars: frozenset[str] = frozenset() 
+
+    # Use sparse GP
+    use_sparse: bool = False
 
     def __post_init__(self):
         # Frozen sets are hashable and immutable
@@ -167,9 +167,21 @@ class GPData:
         # Needs to be generic! 
         # like, automatically sample different input sequences and check distance to existing data.
 
-    # Generate synthetic data
-    # Generate data using Model object ?? !!! Hell yeah!
-    # 
+    @classmethod
+    def _scale_lhs(
+        cls,
+        lhs_samples: np.ndarray, 
+        ranges: dict
+        ) -> np.ndarray:
+        """
+        Scale LHS samples in [0,1] to the given variable ranges.
+        """
+        lows = np.array([low for low, _ in ranges.values()])
+        highs = np.array([high for _, high in ranges.values()])
+        return lows + (highs - lows) * lhs_samples
+    
+
+
 
 '''
 @dataclass
@@ -209,6 +221,7 @@ class GPSettings:
         return Y[:, self.output_index]
 '''
 
+'''
 def create_gp_settings(gps):
     """Create settings for all requested GPs and return them as a dictionary"""
     gp_settings = {}
@@ -254,7 +267,7 @@ def create_gp_settings(gps):
             periodic_inputs=[False, False])
     
     return gp_settings
-
+'''
 
 
 

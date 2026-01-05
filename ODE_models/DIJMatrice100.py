@@ -54,19 +54,17 @@ class DJIMatrice100(ODEModel):
     Input = MatriceInput
     Params = MatriceParams
 
-    def __init__(self, 
-                 state: MatriceState, 
-                 input: MatriceInput, 
-                 params: MatriceParams = None, # optionally get from cfg
+    def __init__(self,
+                 default_params: MatriceParams | None = None,
                  name = None
         ):
-        self.state = state
-        self.input = input
+        #self.input = input
 
         # Get from CFG unless specified in constructor 
-        if not params:
-            params = self.MatriceState.from_dict(data_gen_cfg.PARAMS)
-        self.params = params
+        if default_params is None:
+            default_params = self.MatriceParams.from_dict(data_gen_cfg.PARAMS)
+        
+        self.default_params = default_params
 
         super().__init__(name)
 
@@ -138,7 +136,7 @@ class DJIMatrice100(ODEModel):
     def _gps_to_model(self):
         return {"v1", "v2", "v3"}
     
-    def state_space_data_ranges(self):
+    def _LHS_data_ranges(self):
         return {
             # VELOCITY
             "v1":               (-5, 5),
