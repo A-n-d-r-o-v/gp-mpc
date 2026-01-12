@@ -23,7 +23,7 @@ gp_data.py: New data generation code and some data analysis (dcor heatmap).
 
 gp_models.py: Contains the different GP models (exact single task GP, multi task GP, sparse single task GP) and some evaluation code.
 
-gp.py: GPSettings and GPManager that automatically builds GPs from settings.
+gp.py: GPSettings and GPManager that automatically builds GPs from settings. From here, learning curves can be plotted as well, but note that this is currently broken. Please refer to the branch gp-evaluation for a working learning curve example (just run main.py there).
  
 
 ## Installation instruction
