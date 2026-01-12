@@ -5,12 +5,14 @@ from gpytorch.likelihoods import Likelihood
 from gpytorch.means import Mean
 from gpytorch.models.model_list import IndependentModelList
 
+import torch
+import numpy as np
+
 from gp_data import DataGenerator, SamplingStrategy
-from gp_models import SingleTaskExactGP, SingleTaskSparseGP, MultiTaskExactGP
 
 #from data import StateIdx, InputIdx
 from dataclasses import dataclass, field
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import List, Optional, Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ODEModel import ODEModel # just need it for type hints
@@ -40,8 +42,8 @@ class GPSetting:
     )
     #data: GPData | None = None
 
+    training_iters=50
     lr=0.1
-    iters=50
 
     # Use sparse GP
     use_sparse: bool = False
@@ -81,8 +83,12 @@ class GPSetting:
         # Ensure data exists
         if not hasattr(self, "data_generator") or self.data_generator is None:
             raise ValueError(f"GPSetting {self.name} has no data_generator assigned")
-
+        
         train_x, train_y = self.data_generator.get_training_data()
+        
+        if len(self.output_var_dots) == 1:
+            train_y = train_y.squeeze(-1)  # make shape (N,)
+
         return {
             "train_x": train_x,
             "train_y": train_y,
@@ -98,47 +104,69 @@ class GPManager:
     def __init__(self, name: str):
         self.name = name
 
-    @classmethod    
-    def _build_gp(cls, model: "ODEModel", setting: GPSetting):
-        """
-        Create a single GP model and generate its data from one GPSetting.
-        """
-        X, Y = setting.data_generator.generate_from_vars(model, setting.input_vars, setting.output_var_dots)
-        train_ratio = setting.data_generator.train_ratio
-        setting.data_generator.set_data(
-            *DataGenerator.split_train_test(X, Y, train_ratio=train_ratio)
-        )
-
-        kwargs = setting.get_kwargs()
-
-        if setting.use_sparse:
-            # must be single-output
-            inducing_pts = setting.data_generator.generate_inducing_points(setting.sparse_n_inducing)
-            return SingleTaskSparseGP(inducing_points=inducing_pts, **kwargs)
-        else:
-            if len(setting.output_var_dots) == 1:
-                return SingleTaskExactGP(**kwargs)
-            else:
-                return MultiTaskExactGP(**kwargs)
-
-    def create_ModelList(self, from_model: "ODEModel") -> IndependentModelList:
+    @classmethod
+    def create_ModelList(cls, from_model: "ODEModel") -> IndependentModelList:
         """
         Create a ModelList GP from settings.
         """
+        from gp_models import TrainableGP
         settings = from_model.gp_spec()
         models = []
         for setting in settings:
-            models.append(__class__._build_gp(from_model, setting))
+            models.append(TrainableGP.from_gp_setting(from_model, setting)) # build GP and data
 
-        return IndependentModelList(*models), settings
+        return IndependentModelList(*models)
     
-    
-    def train_models(self, model_list: IndependentModelList):
-        pass
+    @classmethod
+    def train_models(cls, model_list: IndependentModelList):
+        print("Training models...")
+        for gp in model_list.models:
+            # Extract training data from GP's data generator
+            train_X, train_Y = gp.setting.data_generator.X_train, gp.setting.data_generator.Y_train
+            if train_X is None or train_Y is None:
+                raise ValueError(f"GP {gp.setting.name} has no training data.")
+            
+            iters = gp.setting.training_iters
+            lr = gp.setting.lr
 
-    # Maybe not...?
-    def make_predictions(self, model_list: IndependentModelList):
-        pass
+            gp.train_model(train_X, train_Y, iters=iters, lr=lr)
+
+    @classmethod
+    def make_predictions(
+        cls, 
+        model_list: IndependentModelList, 
+        input_dict: Dict[str, float]  # keys: variable names, values: scalars
+    ) -> Dict[str, float]:
+        """
+        Predict for each GP in the model list using the provided input_dict.
+
+        :param model_list: IndependentModelList of trained GPs
+        :param input_dict: Dict containing all possible inputs (state, input, params)
+        :return: Dict mapping output variable names to predicted scalar values
+        """
+        predictions: Dict[str, float] = {}
+
+        for gp in model_list.models:
+            # Determine which input_vars this GP uses
+            input_vars = gp.setting.input_vars
+
+            # Gather input values in the correct order
+            x_list = [torch.tensor([input_dict[k]], dtype=torch.float64) for k in input_vars]
+
+            if not x_list:
+                raise ValueError(f"No input values found for GP {gp.setting.name}")
+
+            # Shape (1, num_inputs)
+            X_gp = torch.cat(x_list, dim=-1).unsqueeze(0)
+
+            # Predict
+            mu, _ = gp.predict(X_gp)  # mu shape: (1, num_outputs) or (1,)
+
+            # Assign to corresponding output variables
+            for i, out_var in enumerate(gp.setting.output_var_dots):
+                predictions[out_var] = mu[0, i].item() if mu.ndim > 1 else mu.item()
+
+        return predictions
 
     @classmethod
     def create_BatchIndependentMultitaskGPModel(cls, settings: Optional[List[GPSetting]] = None):

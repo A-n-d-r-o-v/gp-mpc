@@ -4,10 +4,13 @@ import numpy as np
 
 from typing import List, Type, Optional, TYPE_CHECKING
 from dataclasses import dataclass
+
+from gpytorch.models import IndependentModelList
 #from gp import min_max_norm
 #from math import pi 
+from gp import GPSetting, GPManager
+
 if TYPE_CHECKING: # Type hints only
-    from gp import GPSetting
     from data import ODEData
     from gp_data import DataGenerator
 
@@ -137,46 +140,14 @@ class ODEModel(ABC):
     @abstractmethod
     def _gps_to_model(self) -> Optional[{str}]:
         """
-        Specify the set of GPs to use for prediction.
-        TODO: Should maybe make use of the output fields instead of the GPSetting names. 
+        Specify the set of GP outputs to use for prediction.
+        If None, all outputs are used.
         
         :param self: Description
-        :return: A set of strings containing the names of the GPSettings to use.
+        :return: A set of strings containing the names of the GP output variables to model.
         :rtype: Any | None
         """
         return None
-
-    def _filter_gp_spec(self, gp_spec: List["GPSetting"], names: {str}) -> List["GPSetting"]:
-        """
-        Docstring for filter_gp_spec
-        TODO: Should maybe make use of the output fields instead of the GPSetting names. 
-        
-        :param self: Description
-        :param gp_spec: The list of GP settings
-        :type gp_spec: List["GPSetting"]
-        :param names: Description
-        :type names: List[str]
-        :return: Description
-        :rtype: List[GPSetting]
-        """
-        if not names:
-            raise ValueError("Names cannot be an empty set.")
-        
-        seen_names = set()
-        specs = []
-        for spec in gp_spec:
-            # Check for duplicates
-            if spec.name in seen_names:
-                raise ValueError(f"Duplicate GPSetting name: {spec.name}. Ensure that all GPSetting names are unique.")
-            # Find matching specs
-            if spec.name in names:
-                specs.append(spec)
-            seen_names.add(spec.names)
-
-        if not specs:
-            raise ValueError("No matching names found ")
-        
-        return specs
 
     @abstractmethod
     def _LHS_data_ranges(self, params) -> dict[str, tuple[float, float]]:
@@ -229,7 +200,7 @@ class ODEModel(ABC):
     def filtered_ranges(
             self, 
             ranges: dict[str, tuple[float, float]],
-            keys: set[str] | list[str]
+            keys: set[str] | list[str] | frozenset[str]
         ) -> dict[str, tuple[float, float]]:
         """
         Return a filtered dict of LHS ranges, keeping only the specified keys.
@@ -249,7 +220,7 @@ class ODEModel(ABC):
             state, 
             input, 
             params = None,
-            diff_gps: Optional[List] = None
+            gp_model_list: IndependentModelList | None = None
             #perturbations: List[Perturbation] = None # TODO !!
         ) -> ODEData:
         """
@@ -280,27 +251,27 @@ class ODEModel(ABC):
         # TODO: Maybe all this stuff should be moved to GPManager! Or maybe not..
         # We don't build GPs here...
         # But maybe we can still filter which GPs to predict with.
-        gp_spec = self.gp_spec()
-        gps_to_model = self._gps_to_model()
-        if gps_to_model:
-            gp_spec = self._filter_gp_spec(gp_spec, gps_to_model)
 
         # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
-        if diff_gps:
-            for var_id, gp in diff_gps.items():
-                if not var_id in analytical_dot:
-                    raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
-                #analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
-                # --> {"v1_dot": prediction} (single gp)
-                # --> {"v2_dot": prediction, "pitch": prediction} (multi gp)
+        if gp_model_list:
+            input_dict = {
+                **{k: getattr(state, k) for k in state.__dataclass_fields__},
+                **{k: getattr(input, k) for k in input.__dataclass_fields__},
+                **{k: getattr(params, k) for k in params.__dataclass_fields__},
+            }
 
-                # Get state, input, param vars that match the GP input vars
-                state_in, input_in, param_in = self._classify_var_names(gp.input_vars)
-                gp_inputs = {name: getattr(state, name) for name in state_in}
-                gp_inputs.update({name: getattr(input, name) for name in input_in})
-                gp_inputs.update({name: getattr(params, name) for name in param_in})
+            # Get GP predictions for all relevant variables
+            gp_predictions = GPManager.make_predictions(gp_model_list, input_dict)
+            gps_to_model = self._gps_to_model()
 
-                analytical_dot[var_id] = gp.predict(gp_inputs) # or +=
+            # Update analytical_dot with GP outputs
+            for k, v in gp_predictions.items():
+                if gps_to_model:
+                    if not k in gps_to_model:
+                        continue
+                #print(f"Replacing state_var {k} with gp prediction {v}")
+
+                analytical_dot[k] = v  # or += v if using residual GPs
 
         # ------------------ #
         # -- Result state -- #
@@ -311,10 +282,10 @@ class ODEModel(ABC):
 
         return res_state
     
-    def step(self, state, input, params = None, dt=1): # TODO: optionally add GPs
+    def step(self, state, input, params = None, gp_model_list: IndependentModelList | None = None, dt=1):
         if params is None:
             params = self.params
-        step_state = self.differentiate(state, input, params)
+        step_state = self.differentiate(state, input, params=params, gp_model_list=gp_model_list)
         return state + step_state*dt
     
     '''

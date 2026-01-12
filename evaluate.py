@@ -19,8 +19,17 @@ def main():
 
     model_list = gp_manager.create_ModelList(model)
 
+    GPManager.train_models(model_list)
 
-    #res_s = model.differentiate(DJIMatrice100.MatriceState.zero(), DJIMatrice100.MatriceInput.zero())
+    res_s = model.step(DJIMatrice100.MatriceState.zero(), DJIMatrice100.MatriceInput.zero(), gp_model_list=model_list)
+
+    #import torch
+    #GPManager.make_predictions(model_list, torch.tensor([1,2,3,4,5], dtype=torch.float64).unsqueeze(0))
+
+
+
+    #GPManager.make_predictions()
+
     #res_s = model.differentiate(res_s, DJIMatrice100.MatriceInput.zero())
     #print(res_s)
 
