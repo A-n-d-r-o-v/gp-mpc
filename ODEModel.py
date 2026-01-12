@@ -9,6 +9,7 @@ from dataclasses import dataclass
 if TYPE_CHECKING: # Type hints only
     from gp import GPSetting
     from data import ODEData
+    from gp_data import DataGenerator
 
 from abc import ABC, abstractmethod
 
@@ -25,13 +26,26 @@ class ODEModel(ABC):
     """
 
     # An ODE model needs the following classes that all inherit from ODEData.
-    State: Type[ODEData]    | None = None
-    Input: Type[ODEData]    | None = None
-    Params: Type[ODEData]   | None = None # This contains constants.
+    State: Type[ODEData] | None     = None
+    Input: Type[ODEData] | None     = None
+    Params: Type[ODEData] | None    = None # This contains constants.
 
-    def __init__(self, name: str = None):
+    def __init__(
+            self, 
+            name: str = None, 
+            params: Type[ODEData] = None):
         self.name = name
+        self.params = params
         self._validate_unique_fields()
+        self._validate_gp_spec()
+
+    @classmethod
+    def all_field_names(cls) -> set[str]:
+        return (
+            set(cls.State.__dataclass_fields__) |
+            set(cls.Input.__dataclass_fields__) |
+            set(cls.Params.__dataclass_fields__)
+        )
 
     def _validate_unique_fields(self):
         """
@@ -61,8 +75,8 @@ class ODEModel(ABC):
                 raise ValueError(
                     f"Field name(s) {overlap} appear in both {a} and {b}. "
                     "Field names must be globally unique."
-                )
-            
+                )    
+                    
         return True
     
     def _classify_var_names(self, deps: set[str]):
@@ -87,15 +101,38 @@ class ODEModel(ABC):
         if unknowns:
             raise KeyError(f"Unknown dependency fields: {unknowns}")
 
-        return {
-            "state": tuple(sorted(state)),
-            "input": tuple(sorted(input)),
-            "params": tuple(sorted(params)),
-        }
+        return (
+            tuple(sorted(state)),
+            tuple(sorted(input)),
+            tuple(sorted(params)),
+        )
     
     @abstractmethod
     def gp_spec(self) -> List[GPSetting]:
-        pass
+        raise NotImplementedError
+    
+    def _validate_gp_spec(self):
+        # Each var in output_var_dots may only exist in one instance - they must be unique.
+        # seen_in_vars, seen_out_vars = set(), set()
+        
+        settings = self.gp_spec()
+        
+        seen_out_vars = set()
+
+        for setting in settings:
+            setting.validate()
+            # for in_var in setting.input_vars:
+            #     seen_in_vars.add(in_var)
+            for out_var in setting.output_var_dots:
+                if out_var in seen_out_vars:
+                    raise ValueError(f"output_var '{out_var}' appears in multiple GPSettings")
+                seen_out_vars.add(out_var)       
+
+        #in_out_overlap = set.intersection(seen_in_vars, seen_out_vars)
+        #if len(in_out_overlap) != 0:
+        #    raise ValueError(f"Overlapping input and output variables: {in_out_overlap}")
+        
+        return True
 
     @abstractmethod
     def _gps_to_model(self) -> Optional[{str}]:
@@ -154,7 +191,7 @@ class ODEModel(ABC):
         """
         raise NotImplementedError
 
-    def get_LHS_data_ranges_safe(self, params) -> dict[str, tuple[float, float]]:
+    def get_LHS_data_ranges_safe(self, params=None) -> dict[str, tuple[float, float]]:
         """
         Get the LHS_data_ranges dict and validate that the dict structure is correctly implemented.
         Return the dict of ranges if no errors are present.
@@ -166,6 +203,9 @@ class ODEModel(ABC):
         :return: The ranges, if no errors are present.
         :rtype: dict[str, tuple[float, float]]
         """
+        if not params:
+            params = self.params
+
         ranges = self._LHS_data_ranges(params)
         if ranges is None:
             raise ValueError("Ranges is None. Ensure that it is implemented.")
@@ -185,16 +225,30 @@ class ODEModel(ABC):
                 raise ValueError(f"Invalid range for '{k}': {v}")
 
         return ranges
+    
+    def filtered_ranges(
+            self, 
+            ranges: dict[str, tuple[float, float]],
+            keys: set[str] | list[str]
+        ) -> dict[str, tuple[float, float]]:
+        """
+        Return a filtered dict of LHS ranges, keeping only the specified keys.
+        """
+        return {k: v for k, v in ranges.items() if k in keys}
+    
+    @abstractmethod
+    def default_data_generator(self) -> DataGenerator:
+        pass
 
     @abstractmethod
     def _analytical_dot(self, state, input, params) -> dict[str, float]:
-        pass
+        raise NotImplementedError
 
     def differentiate(
             self,
             state, 
             input, 
-            params,
+            params = None,
             diff_gps: Optional[List] = None
             #perturbations: List[Perturbation] = None # TODO !!
         ) -> ODEData:
@@ -215,32 +269,36 @@ class ODEModel(ABC):
         :return: The resulting State.
         :rtype: ODEData
         """
-                #return super().differentiate(state, input, params, diff_gps)
-       
+        if params is None:
+            params = self.params
+
         analytical_dot = self._analytical_dot(state, input, params)
 
-        self.State._validate_field_dict(analytical_dot) # check that everything is there...
+        # check that everything is there...
+        self.State.validate_covered_by_dict(analytical_dot, allow_missing=False, allow_extra=False) 
 
         # TODO: Maybe all this stuff should be moved to GPManager! Or maybe not..
         # We don't build GPs here...
         # But maybe we can still filter which GPs to predict with.
         gp_spec = self.gp_spec()
-        if self.gps_to_model:
-            gp_spec = self._filter_gp_spec(gp_spec, self._gps_to_model())
+        gps_to_model = self._gps_to_model()
+        if gps_to_model:
+            gp_spec = self._filter_gp_spec(gp_spec, gps_to_model)
 
         # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
         if diff_gps:
             for var_id, gp in diff_gps.items():
                 if not var_id in analytical_dot:
                     raise KeyError(f"Unknown GP key '{var_id}' was not found in analytical_dot.")
-                analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
+                #analytical_dot[var_id] = diff_gps[var_id].predict() # TODO. Predict on what? gotta grab those values
                 # --> {"v1_dot": prediction} (single gp)
                 # --> {"v2_dot": prediction, "pitch": prediction} (multi gp)
 
-                # TODO: look over. reasonable?
-                deps = self._classify_var_names(gp.input_vars)
-                gp_inputs = {name: getattr(state, name) for name in deps["state"]}
-                gp_inputs.update({name: getattr(input, name) for name in deps["input"]})
+                # Get state, input, param vars that match the GP input vars
+                state_in, input_in, param_in = self._classify_var_names(gp.input_vars)
+                gp_inputs = {name: getattr(state, name) for name in state_in}
+                gp_inputs.update({name: getattr(input, name) for name in input_in})
+                gp_inputs.update({name: getattr(params, name) for name in param_in})
 
                 analytical_dot[var_id] = gp.predict(gp_inputs) # or +=
 
@@ -253,9 +311,11 @@ class ODEModel(ABC):
 
         return res_state
     
-    def step(self, state, input, params, dt=1): # TODO: optionally add GPs
+    def step(self, state, input, params = None, dt=1): # TODO: optionally add GPs
+        if params is None:
+            params = self.params
         step_state = self.differentiate(state, input, params)
-        return state.sum(step_state*dt)
+        return state + step_state*dt
     
     '''
     @abstractmethod

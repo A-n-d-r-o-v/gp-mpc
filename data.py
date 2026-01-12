@@ -52,19 +52,23 @@ class ODEData:
         """Euclidean distance to another instance of same type."""
         return np.linalg.norm(self.as_numpy() - other.as_numpy())
     
-    def sum(self, other):
-        """Return a new instance representing self + other."""
-        diff_values = self.as_numpy() + other.as_numpy()
-        return self.__class__.from_numpy(diff_values)
+    def __add__(self, other: "ODEData") -> "ODEData":
+        return self.__class__.from_numpy(self.as_numpy() + other.as_numpy())
 
-    def difference(self, other):
-        """Return a new instance representing self - other."""
-        diff_values = self.as_numpy() - other.as_numpy()
-        return self.__class__.from_numpy(diff_values)
+    def __sub__(self, other: "ODEData") -> "ODEData":
+        return self.__class__.from_numpy(self.as_numpy() - other.as_numpy())
 
-    def difference_dict(self, other) -> dict:
-        """Return element-wise differences as a dict."""
-        return self.difference(other).as_dict()
+    # Scalar multiplication
+    def __mul__(self, factor: float) -> "ODEData":
+        return self.__class__.from_numpy(self.as_numpy() * factor)
+
+    # Right-hand scalar multiplication (e.g., dt * state)
+    def __rmul__(self, factor: float) -> "ODEData":
+        return self.__mul__(factor)
+
+    # Scalar division
+    def __truediv__(self, factor: float) -> "ODEData":
+        return self.__class__.from_numpy(self.as_numpy() / factor)
     
     @classmethod
     def validate_covered_by_dict(cls, d: dict, allow_missing: bool = False, allow_extra: bool = True) -> bool:
