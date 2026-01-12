@@ -14,10 +14,15 @@ More configuration for GPs: use different types (sparse, multi, single, … ) fo
 In the ODEs (“analytical dot”), the GPs automatically replace the corresponding variables. For example, if there is a GP for v3_dot, this GP’s prediction will be used in place of the ODE for v3_dot.
 
 ODEModel: Base logic for ODE models.
+
 ODEModels/DJIMatrice100.py: A model for the Matrice100 drone.
+
 data.py: A generic base class for dataclasses like State, Input, etc, to inherit from.
+
 gp_data.py: New data generation code and some data analysis (dcor heatmap).
+
 gp_models.py: Contains the different GP models (exact single task GP, multi task GP, sparse single task GP) and some evaluation code.
+
 gp.py: GPSettings and GPManager that automatically builds GPs from settings.
  
 
