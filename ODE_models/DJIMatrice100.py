@@ -73,7 +73,7 @@ class DJIMatrice100(ODEModel):
 
     # ===============================
 
-    def gp_spec(self) -> List["GPSetting"]:
+    def gp_spec_v2(self) -> List["GPSetting"]:
         """
         GP spec based on distance correlation matrix data.
         
@@ -98,11 +98,11 @@ class DJIMatrice100(ODEModel):
                 output_var_dots = {"v3"}, 
                 input_vars  = {"roll", "pitch", "thrust"}, 
                 periodic_vars = None,
-                name = "v3"
+                name = "v3",
             )
         ]
     
-    def gp_spec_v2(self) -> List["GPSetting"]:
+    def gp_spec(self) -> List["GPSetting"]:
         return [
             GPSetting(
                 output_var_dots = {"v1"}, 

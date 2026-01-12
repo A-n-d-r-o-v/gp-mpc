@@ -8,6 +8,14 @@ from typing import List, TYPE_CHECKING, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+import seaborn as sns
+from scipy.cluster.hierarchy import linkage, dendrogram
+from scipy.spatial.distance import squareform
+
+import dcor  # distance correlation library
+import matplotlib.pyplot as plt
+
+
 if TYPE_CHECKING:
     from ODEModel import ODEModel # just need it for type hints
     #from gp import GPSetting
@@ -54,6 +62,52 @@ class DataGenerator:
         if self.X_test is None or self.Y_test is None:
             raise ValueError("Test data is unassigned.")
         return self.X_test, self.Y_test
+    
+    @classmethod
+    def plot_dcor_heatmap(cls, model: "ODEModel", n_samples: int = 20000):
+        """
+        Generate LHS data and plot a distance correlation heatmap of the state differences ΔS.
+        Automatically filters out variables with zero variance.
+        """
+        # Generate data
+        var_names = list(model.State.__dataclass_fields__.keys())
+        X, Y = cls.generate_synthetic_lhs(model, n_samples=n_samples, output_var_dots=var_names)
+
+        # Filter out constant columns
+        filtered_names = []
+        filtered_cols = []
+        for i, name in enumerate(var_names):
+            col = Y[:, i]
+            if not np.allclose(col, col[0]):  # skip columns with zero variance
+                filtered_names.append(name)
+                filtered_cols.append(col)
+
+        if len(filtered_cols) == 0:
+            raise ValueError("All variables are constant; cannot compute distance correlations.")
+
+        Y_filtered = np.stack(filtered_cols, axis=1)
+        N_vars = len(filtered_names)
+
+        # Compute dcor matrix
+        dcor_matrix = np.zeros((N_vars, N_vars))
+        for i in range(N_vars):
+            for j in range(N_vars):
+                val = dcor.distance_correlation(Y_filtered[:, i], Y_filtered[:, j])
+                if np.isnan(val) or np.isinf(val):
+                    val = 0.0
+                dcor_matrix[i, j] = np.clip(val, 0, 1)  # ensure valid [0,1] range
+
+        # Plot heatmap
+        sns.set(style="white")
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(dcor_matrix, annot=True, fmt=".2f", cmap="coolwarm",
+                    xticklabels=filtered_names, yticklabels=filtered_names)
+        plt.title("Distance Correlation of State Differences")
+        plt.tight_layout()
+        plt.show()
+
+    def normalize(self):
+        raise NotImplementedError
 
     def generate_from_vars(self, model: "ODEModel", input_vars, output_var_dots):
         

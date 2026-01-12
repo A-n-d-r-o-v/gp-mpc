@@ -3,14 +3,14 @@ from __future__ import annotations
 import torch
 import gpytorch
 import numpy as np
+import matplotlib.pyplot as plt
 
 from math import pi
 from gp_to_casadi import get_xdot
 
-from gp import GPSetting
-
 from typing import TYPE_CHECKING
 
+from gp import GPSetting
 from gp_data import DataGenerator
 
 if TYPE_CHECKING:
@@ -34,7 +34,6 @@ class TrainableGP:
             *DataGenerator.split_train_test(X, Y, train_ratio=train_ratio)
         )
 
-        # Collect constructor kwargs
         kwargs = setting.get_kwargs()
 
         # Create GP
@@ -85,6 +84,111 @@ class TrainableGP:
         with gpytorch.settings.fast_pred_var():
             preds = self.likelihood(self(X))
             return preds.mean.cpu().numpy(), preds.variance.cpu().numpy()
+        
+
+    # ------------ Evaluation ------------ #
+
+    @torch.no_grad()
+    def eval_RMSE(self, X_test, Y_test, per_output: bool = False):
+        """Root Mean Squared Error"""
+        self.eval()
+        self.likelihood.eval()
+
+        with gpytorch.settings.fast_pred_var():
+            pred = self.likelihood(self(X_test))
+            error = pred.mean - Y_test
+
+        if per_output and error.ndim > 1:
+            rmse = torch.sqrt(torch.mean(error**2, dim=0))
+        else:
+            rmse = torch.sqrt(torch.mean(error**2))
+        return rmse.item() if isinstance(rmse, torch.Tensor) and rmse.ndim == 0 else rmse
+
+    @torch.no_grad()
+    def eval_MAE(self, X_test, Y_test, per_output: bool = False):
+        """Mean Absolute Error"""
+        self.eval()
+        self.likelihood.eval()
+
+        with gpytorch.settings.fast_pred_var():
+            pred = self.likelihood(self(X_test))
+            error = torch.abs(pred.mean - Y_test)
+
+        if per_output and error.ndim > 1:
+            mae = torch.mean(error, dim=0)
+        else:
+            mae = torch.mean(error)
+        return mae.item() if isinstance(mae, torch.Tensor) and mae.ndim == 0 else mae
+
+    @torch.no_grad()
+    def eval_NLPD(self, X_test, Y_test):
+        """Negative Log Predictive Density"""
+        self.eval()
+        self.likelihood.eval()
+
+        with gpytorch.settings.fast_pred_var():
+            pred = self.likelihood(self(X_test))
+            nlpd = gpytorch.metrics.negative_log_predictive_density(pred, Y_test)
+        return nlpd.item()
+
+    @torch.no_grad()
+    def eval_MSLL(self, X_train, Y_train, X_test, Y_test):
+        """Mean Standardized Log Loss"""
+        self.eval()
+        self.likelihood.eval()
+
+        with gpytorch.settings.fast_pred_var():
+            pred = self.likelihood(self(X_test))
+            msll = gpytorch.metrics.mean_standardized_log_loss(pred, Y_test, Y_train)
+        return msll.item()
+        
+
+    def evaluate_all(
+        self,
+        X_test,
+        Y_test,
+        X_train=None,
+        Y_train=None,
+        per_output: bool = False
+    ) -> dict:
+        """
+        Evaluate multiple metrics for the GP on test (and optionally train) data.
+
+        :param X_test: Test inputs (torch.Tensor or convertible to Tensor)
+        :param Y_test: Test outputs (torch.Tensor or convertible to Tensor)
+        :param X_train: Optional train inputs (needed for MSLL)
+        :param Y_train: Optional train outputs (needed for MSLL)
+        :param per_output: If True, RMSE and MAE are returned per output variable
+        :return: Dictionary with keys: 'RMSE', 'MAE', 'NLPD', 'MSLL'
+        """
+        metrics = {}
+
+        # Ensure tensors
+        if not isinstance(X_test, torch.Tensor):
+            X_test = torch.tensor(X_test, dtype=torch.float64)
+        if not isinstance(Y_test, torch.Tensor):
+            Y_test = torch.tensor(Y_test, dtype=torch.float64)
+        if X_train is not None and not isinstance(X_train, torch.Tensor):
+            X_train = torch.tensor(X_train, dtype=torch.float64)
+        if Y_train is not None and not isinstance(Y_train, torch.Tensor):
+            Y_train = torch.tensor(Y_train, dtype=torch.float64)
+
+        # RMSE
+        metrics['RMSE'] = self.eval_RMSE(X_test, Y_test, per_output=per_output)
+
+        # MAE
+        metrics['MAE'] = self.eval_MAE(X_test, Y_test, per_output=per_output)
+
+        # NLPD
+        metrics['NLPD'] = self.eval_NLPD(X_test, Y_test)
+
+        # MSLL (requires training data)
+        if X_train is not None and Y_train is not None:
+            metrics['MSLL'] = self.eval_MSLL(X_train, Y_train, X_test, Y_test)
+        else:
+            metrics['MSLL'] = None
+
+        return metrics
         
 
 class SingleTaskExactGP(TrainableGP, gpytorch.models.ExactGP):

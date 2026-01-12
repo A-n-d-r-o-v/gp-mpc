@@ -7,12 +7,12 @@ from gpytorch.models.model_list import IndependentModelList
 
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
 from gp_data import DataGenerator, SamplingStrategy
 
-#from data import StateIdx, InputIdx
 from dataclasses import dataclass, field
-from typing import List, Optional, Any, Dict, TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
     from ODEModel import ODEModel # just need it for type hints
@@ -114,7 +114,7 @@ class GPManager:
     @classmethod
     def create_ModelList(cls, from_model: "ODEModel") -> IndependentModelList:
         """
-        Create a ModelList GP from settings.
+        Create a ModelList GP from model settings.
         """
         from gp_models import TrainableGP
         settings = from_model.gp_spec()
@@ -174,124 +174,103 @@ class GPManager:
                 predictions[out_var] = mu[0, i].item() if mu.ndim > 1 else mu.item()
 
         return predictions
-
+    
     @classmethod
-    def create_BatchIndependentMultitaskGPModel(cls, settings: Optional[List[GPSetting]] = None):
+    def plot_GP_learning_curve(
+        cls,
+        ode_model: "ODEModel",
+        model_list: IndependentModelList,
+        training_sizes: Iterable[int],
+        lr: float = 0.5,
+        training_iter: int = 50,
+    ):
         """
-        TODO: Could be interesting to look into.
-        
-        :param cls: 
-        :param settings: Optionally build from this list of GP settings instead of self.gp_settings.
-        :type settings: Optional[List[GPSetting]]
+        Plot learning curves for all GPs in an IndependentModelList.
+        Automatically generates data per GP using its GPSetting.
         """
-        # each setting: 
-        #   - Exactly one output var
-        #   - Not sparse
-        # All settings must use the same input_vars 
-        num_tasks = len(settings)
-        raise NotImplementedError
 
+        eval_data = {}
 
+        for N in training_sizes:
+            print(f"\n=== Training size N = {N} ===")
+            eval_data[N] = {}
 
+            for gp in model_list.models:
+                setting = gp.setting
+                print(f"GP: {setting.name}")
 
-'''
-@dataclass
-class GPSettings:
-    """Settings for a single GP model"""
-    name: str
-    state_indices: List[int]  # Which state variables are inputs
-    control_indices: List[int]  # Which control variables are inputs
-    output_index: int  # Which state derivative this GP predicts
-    periodic_inputs: List[bool]  # Which inputs are periodic
-    
-    @property
-    def input_dim(self):
-        """Number of inputs in total"""
-        return len(self.state_indices) + len(self.control_indices)
-    
-    @property
-    def control_dim(self):
-        """Number of control inputs"""
-        return len(self.control_indices)
-    
-    @property
-    def state_dim(self):
-        """Number of state inputs"""
-        return len(self.state_indices)
-    
-    def get_input_indices(self):
-        """Get the indices for all inputs, state first then control"""
-        return self.state_indices + self.control_indices
-    
-    def get_input(self, X: np.ndarray):
-        """Extract the relevant input"""
-        return X[:, self.get_input_indices()]
-    
-    def get_output(self, Y: np.ndarray):
-        """Get the relevant output"""
-        return Y[:, self.output_index]
-'''
+                X, Y = setting.data_generator.generate_from_vars(
+                    ode_model, setting.input_vars, setting.output_var_dots
+                )
 
-'''
-def create_gp_settings(gps):
-    """Create settings for all requested GPs and return them as a dictionary"""
-    gp_settings = {}
-    
-    if StateIdx.V1 in gps:
-        gp_settings[StateIdx.V1] = GPSettings(
-            name="v1_dot",
-            state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
-            control_indices=[StateIdx.THRUST],
-            output_index=StateIdx.V1,
-            periodic_inputs=[False, False, False, False])
+                min_rows = min(X.shape[0], Y.shape[0])
+                if min_rows < N:
+                    raise ValueError(f"Not enough samples ({min_rows}) for requested N={N}")
+                X = X[:min_rows, :]
+                Y = Y[:min_rows, :]
 
-    if StateIdx.V2 in gps:
-        gp_settings[StateIdx.V2] = GPSettings(
-            name="v2_dot",
-            state_indices=[StateIdx.ROLL, StateIdx.PITCH, StateIdx.YAW],
-            control_indices=[StateIdx.THRUST],
-            output_index=StateIdx.V2,
-            periodic_inputs=[False, False, False, False])
+                X = X[:N, :]
+                Y = Y[:N, :]
 
-    if StateIdx.V3 in gps:
-        gp_settings[StateIdx.V3] = GPSettings(
-            name="v3_dot",
-            state_indices=[StateIdx.ROLL, StateIdx.PITCH],
-            control_indices=[StateIdx.THRUST],
-            output_index=StateIdx.V3,
-            periodic_inputs=[False, False, False])
+                X_train, X_test, Y_train, Y_test = DataGenerator.split_train_test(
+                    X, Y, train_ratio=0.8
+                )
 
-    if StateIdx.ROLL in gps:
-        gp_settings[StateIdx.ROLL] = GPSettings(
-            name="roll_dot",
-            state_indices=[StateIdx.ROLL],
-            control_indices=[StateIdx.ROLL_REF],
-            output_index=StateIdx.ROLL,
-            periodic_inputs=[False, False])
+                print(f"Shapes after split: X_train={X_train.shape}, Y_train={Y_train.shape}, "
+                    f"X_test={X_test.shape}, Y_test={Y_test.shape}")
 
-    if StateIdx.PITCH in gps:
-        gp_settings[StateIdx.PITCH] = GPSettings(
-            name="pitch_dot",
-            state_indices=[StateIdx.PITCH],
-            control_indices=[StateIdx.PITCH_REF],
-            output_index=StateIdx.PITCH,
-            periodic_inputs=[False, False])
-    
-    return gp_settings
-'''
+                X_train = torch.tensor(X_train, dtype=torch.float64)
+                X_test = torch.tensor(X_test, dtype=torch.float64)
+                Y_train = torch.tensor(Y_train, dtype=torch.float64)
+                Y_test = torch.tensor(Y_test, dtype=torch.float64)
 
+                if isinstance(gp, gpytorch.models.ExactGP):
+                    gp.set_train_data(inputs=X_train, targets=Y_train, strict=False)
 
+                gp.train_model(X_train, Y_train, iters=training_iter, lr=lr)
 
-"""
-# When you predic you want to set a known min max values such that the 
-# value to predic is scaled in accordance with the training data
-def min_max_norm(data, set_min=None, set_max=None):
-    if set_min and set_max:
-        min = set_min
-        max = set_max
-    else:
-        min = np.min(data)
-        max = np.max(data)
-    
-    return (data - min)/(max - min) if min != max else data
-"""
+                metrics = {
+                    "RMSE": gp.eval_RMSE(X_test, Y_test),
+                    "MAE": gp.eval_MAE(X_test, Y_test),
+                    "NLPD": gp.eval_NLPD(X_test, Y_test),
+                    "MSLL": gp.eval_MSLL(X_train, Y_train, X_test, Y_test)
+                }
+                eval_data[N][setting.name] = metrics
+
+        # ---------- Plot ----------
+        metrics_errors = ["RMSE", "MAE"]
+        metrics_likelihood = ["NLPD", "MSLL"]
+        colors_error = {"RMSE": "tab:blue", "MAE": "deepskyblue"}
+        colors_likelihood = {"NLPD": "orange", "MSLL": "red"}
+
+        training_sizes_ls = sorted(eval_data.keys())
+
+        for gp in model_list.models:
+            name = gp.setting.name
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+            # Left: RMSE / MAE
+            for metric in metrics_errors:
+                values = [eval_data[N][name][metric] for N in training_sizes_ls]
+                axes[0].plot(training_sizes_ls, values, marker='o', label=metric, color=colors_error[metric])
+            axes[0].set_xlabel("Number of training samples (N)")
+            axes[0].set_ylabel("RMSE / MAE")
+            axes[0].set_title("Error metrics")
+            axes[0].grid(True)
+            axes[0].legend()
+
+            # Right: NLPD / MSLL
+            for metric in metrics_likelihood:
+                values = [eval_data[N][name][metric] for N in training_sizes_ls]
+                axes[1].plot(training_sizes_ls, values, marker='x', label=metric, color=colors_likelihood[metric])
+            axes[1].set_xlabel("Number of training samples (N)")
+            axes[1].set_ylabel("NLPD / MSLL")
+            axes[1].set_title("Likelihood metrics")
+            axes[1].grid(True)
+            axes[1].legend()
+
+            plt.suptitle(f"Learning curves for {name}", fontsize=16)
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
+
+        return eval_data

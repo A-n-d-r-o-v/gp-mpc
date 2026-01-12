@@ -248,10 +248,6 @@ class ODEModel(ABC):
         # check that everything is there...
         self.State.validate_covered_by_dict(analytical_dot, allow_missing=False, allow_extra=False) 
 
-        # TODO: Maybe all this stuff should be moved to GPManager! Or maybe not..
-        # We don't build GPs here...
-        # But maybe we can still filter which GPs to predict with.
-
         # If a state variable is associated with a trained GP, replace the analytical_dot entry with the GP prediction.
         if gp_model_list:
             input_dict = {
