@@ -30,8 +30,8 @@ class GPSetting:
     name: str 
 
     kernel: Kernel = gpytorch.kernels.RBFKernel()
-    likelihood: Likelihood = gpytorch.likelihoods.GaussianLikelihood()
     mean_module: Mean = gpytorch.means.ConstantMean()
+    likelihood: Likelihood = None
 
     # Optional subset of input_vars that are periodic 
     periodic_vars: frozenset[str] = frozenset() 
@@ -60,6 +60,13 @@ class GPSetting:
             self.periodic_vars = frozenset(self.periodic_vars)
         else:
             self.periodic_vars = frozenset()
+
+        num_tasks = len(self.output_var_dots)
+        if self.likelihood is None:
+            if num_tasks > 1:
+                self.likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=num_tasks)
+            else:
+                self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
     def validate(self):
         # output_var_dots, input_vars should not be empty sets.
